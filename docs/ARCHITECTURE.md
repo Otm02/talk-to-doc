@@ -329,30 +329,31 @@ From reference §1, all GA names: `session.type: "realtime"`, `model: env.REALTI
 
 ## 8. Environment
 
-Validated in `src/server/env.ts`. Secrets are marked S; none has a `NEXT_PUBLIC_` prefix.
+Validated lazily in `src/server/env.ts` (first request, not build). Secrets are marked S; none has a `NEXT_PUBLIC_` prefix. This is the M1 list; later milestones add their own variables.
 
-| Var | S | Dev default | Prod | Notes |
-|---|---|---|---|---|
-| `OPENAI_API_KEY` | S | required for live only | required | |
-| `REALTIME_MODEL` | | `gpt-realtime-2.1-mini` | mini → `gpt-realtime-2.1` at end of M13 | enum of the two |
-| `CONTEXT_TOKEN_BUDGET` | | 8000 | 20000 | 1000–60000 |
-| `VOICE_ENABLED` | | true | true | kill switch |
-| `DAILY_SESSION_CAP` | | 50 | 25 | |
-| `DAILY_SPEND_LIMIT_USD` | | 1 | 4 | |
-| `SPEND_LIMIT_USD` | | 4 | 14 | cumulative |
-| `MAX_SESSION_SECONDS` | | 600 | 600 | |
-| `UPLOAD_MODE` | | `direct` | `blob` | `direct` refused when `VERCEL_ENV` is set |
-| `BLOB_READ_WRITE_TOKEN` | S | — | required when `blob` | `handleUpload` needs it |
-| `STATE_DRIVER` | | `memory` | `upstash` | `memory` refused when `VERCEL_ENV` is set |
-| `UPSTASH_REDIS_REST_URL` / `KV_REST_API_URL` | S | — | required when `upstash` | both names accepted |
-| `UPSTASH_REDIS_REST_TOKEN` / `KV_REST_API_TOKEN` | S | — | required when `upstash` | |
-| `YOUTUBE_PROVIDERS` | | `direct` | `supadata` or `direct,supadata` | `fixture` refused in production |
-| `SUPADATA_API_KEY` | S | optional | required when listed | |
-| `SUPADATA_MONTHLY_CAP` | | 20 | 80 | credits |
-| `IP_HASH_SALT` | S | dev value | random | IPs are stored only as salted hashes |
-| `CRON_SECRET` | S | — | required | Vercel cron auth |
-| `NEXT_PUBLIC_UPLOAD_MODE` | | `direct` | `blob` | must match `UPLOAD_MODE`; checked at boot |
-| `NEXT_PUBLIC_REALTIME_TRANSPORT` | | `webrtc` | `webrtc` | `mock` only in e2e builds; ignored when `VERCEL_ENV=production` |
+| Var | S | Default | Notes |
+|---|---|---|---|
+| `OPENAI_API_KEY` | S | none | needed only for live sessions (`requireOpenAIKey()`) |
+| `SUPADATA_API_KEY` | S | none | optional |
+| `REALTIME_MODEL` | | `gpt-realtime-2.1-mini` | mini or `gpt-realtime-2.1`; production switches at the end |
+| `REALTIME_VOICE` | | `marin` | |
+| `REALTIME_REASONING_EFFORT` | | `low` | minimal, low, medium, high |
+| `CONTEXT_TOKEN_BUDGET` | | 8000 | 1000-60000 |
+| `MAX_SESSION_MINUTES` | | 5 | |
+| `DOC_TTL_MINUTES` | | 120 | |
+| `UPLOAD_MODE` | | `direct` locally, `blob` on Vercel | `direct` refused on Vercel |
+| `VOICE_ENABLED` | | true | kill switch |
+| `DAILY_SESSION_CAP` | | 40 | |
+| `DAILY_SPEND_LIMIT_USD` | | 3 | |
+| `ADMIN_TOKEN` | S | none | optional |
+| `BLOB_READ_WRITE_TOKEN` | S | none | set by the Blob integration |
+| `UPSTASH_REDIS_REST_URL` / `KV_REST_API_URL` | S | none | both names accepted |
+| `UPSTASH_REDIS_REST_TOKEN` / `KV_REST_API_TOKEN` | S | none | set together with the URL |
+| `NEXT_PUBLIC_REALTIME_TRANSPORT` | | `webrtc` | `mock` in e2e |
+
+The state driver is inferred: Upstash variables present means `upstash`, otherwise `memory`. On Vercel (`VERCEL` or `VERCEL_ENV` set) the Upstash variables are required and `UPLOAD_MODE=direct` is refused, so a misconfigured preview fails loudly. `SPEND_LIMIT_USD`, `IP_HASH_SALT`, `CRON_SECRET` and `YOUTUBE_PROVIDERS` from the earlier draft move to the milestones that use them.
+
+Next 16 note: with `cacheComponents`, `export const runtime` is a build error. Route handlers run on Node by default, so they export nothing.
 
 ## 9. Decisions
 
