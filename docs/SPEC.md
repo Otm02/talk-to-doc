@@ -16,11 +16,11 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 
 | ID | Requirement (paraphrased) | How we satisfy it | Proof | Milestone |
 |---|---|---|---|---|
-| FR-ING-01 | Accept a PDF upload up to 25 MB | Size is checked three times: client check, `maximumSizeInBytes` on the Blob token, then a server check of the real size and `%PDF-` magic bytes. The browser uploads straight to Vercel Blob (`UPLOAD_MODE=blob`), or as multipart locally and in CI (`UPLOAD_MODE=direct`) | `src/server/pdf/validate.test.ts`, `src/server/upload/token.test.ts`, `e2e/ingest-pdf.spec.ts` | M2, M4 |
+| FR-ING-01 | Accept a PDF upload up to 25 MB | Size is checked three times: client check, `maximumSizeInBytes` on the Blob token, then a server check of the real size and `%PDF-` magic bytes. The browser uploads straight to Vercel Blob (`UPLOAD_MODE=blob`), or as multipart locally and in CI (`UPLOAD_MODE=direct`) | `src/server/ingest/pdf/validate.test.ts`, `src/server/upload/token.test.ts`, `e2e/ingest-pdf.spec.ts` | M2, M4 |
 | FR-ING-02 | Accept a YouTube link and use the video's captions | Strict URL parser covering every shape in reference §4. A provider chain fetches captions: direct InnerTube fetcher, then Supadata | `src/server/youtube/parse-url.test.ts`, `src/server/youtube/direct.test.ts`, `e2e/ingest-youtube.spec.ts` | M3, M4 |
 | FR-ING-03 | PDF ingestion works on the deployed app | Blob client upload means no PDF ever passes through a Function body (4.5 MB cap). Ingest streams NDJSON | MC-1 (20 MB PDF on a preview, M2), MC-6 (production, M11) | M2, M11 |
 | FR-ING-04 | YouTube works at least locally; deployed is a bonus, and the README explains the limitation or how we beat it | Direct fetcher works locally. Supadata fallback (`mode=native`) on Vercel. README has a "YouTube on Vercel" section | MC-2 (local), MC-7 (deployed), README review | M3, M12 |
-| FR-ING-05 | Text is extracted on the server | `unpdf` per page in `src/server/pdf`. Captions fetched and parsed in `src/server/youtube` | `src/server/pdf/extract.test.ts`, `src/server/youtube/captions-xml.test.ts` | M2, M3 |
+| FR-ING-05 | Text is extracted on the server | `unpdf` per page in `src/server/ingest/pdf`. Captions fetched and parsed in `src/server/youtube` | `src/server/ingest/pdf/extract.test.ts`, `src/server/youtube/captions-xml.test.ts` | M2, M3 |
 | FR-ING-06 | Extracted text is shown in a collapsible preview | The document screen has a collapsible full-text panel with page or timestamp markers. Pages render as they stream in | `src/features/document/text-preview.test.tsx`, `e2e/ingest-pdf.spec.ts` | M4 |
 | FR-CTX-01 | Extracted text becomes context for the Realtime session | The server builds session instructions from DocumentStore (never from client-sent text), fences them as untrusted, and mints the client secret with them already in place | `src/server/context/build-instructions.test.ts`, `src/server/session/service.test.ts` | M5 |
 | FR-CTX-02 | No chunking, summarizing or citations needed | Out of scope. The only reduction is the `CONTEXT_TOKEN_BUDGET` cap, with a visible coverage notice | `src/server/context/budget.test.ts` | M5 |
@@ -75,7 +75,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | ID | Rubric area | Top-score behavior we commit to | Proof | Milestone |
 |---|---|---|---|---|
 | RUB-1 | Product polish (mobile) | Every async action has four visible states. Exact copy for every error (section 4). Safe areas, dvh units, keyboard-aware composer, reduced motion, 44 px targets, aria-live transcript | `e2e/states.spec.ts`, `e2e/layout.spec.ts`, MC-4 | M4, M7, M8 |
-| RUB-2 | Ingestion quality | Every PDF and YouTube edge case in section 5 has a defined behavior and a test. Ligatures and hyphenation fixed, non-Latin text kept, scanned PDFs detected | `src/server/pdf/*.test.ts`, `src/server/youtube/*.test.ts` | M2, M3, M12 |
+| RUB-2 | Ingestion quality | Every PDF and YouTube edge case in section 5 has a defined behavior and a test. Ligatures and hyphenation fixed, non-Latin text kept, scanned PDFs detected | `src/server/ingest/pdf/*.test.ts`, `src/server/youtube/*.test.ts` | M2, M3, M12 |
 | RUB-3 | Code quality | TS strict, no `any`, zod at every boundary, discriminated unions with exhaustive switches, small modules, tests next to code, comments that explain why | `pnpm check`, reviewer report | all |
 | RUB-4 | System design | Thin routes over services; three state adapters chosen by env; every external call behind an adapter with a timeout and typed errors; a pure realtime reducer behind a transport interface | ARCHITECTURE.md, contract tests | M1, M5, M6, M10 |
 
@@ -173,6 +173,7 @@ Text mode uses the same Realtime session with `output_modalities: ["text"]` per 
 | `pdf_not_pdf` | 415 | This file isn't a PDF. Choose a .pdf file. | Choose another file |
 | `pdf_encrypted` | 422 | This PDF is password-protected. Remove the password and try again. | Choose another file |
 | `pdf_corrupted` | 422 | We couldn't open this PDF. It may be damaged. | Choose another file |
+| `pdf_unreadable` | 422 | We couldn't read this PDF. Try a different file. | Choose another file |
 | `pdf_no_text` | 422 | This PDF has no selectable text. It may be a scan. Try a PDF with real text. | Choose another file |
 | `pdf_too_many_pages` | 422 | This PDF has more than 2,000 pages. Try a shorter one. | Choose another file |
 | `pdf_timeout` | 504 | This PDF took too long to read. Try a smaller file. | Try again |
@@ -237,10 +238,10 @@ Each row has a fixture and a test. Fixtures live in `test/fixtures/` and are gen
 | Encrypted with a user password | pdf.js `PasswordException` | `pdf_encrypted` | `extract.test.ts` |
 | Owner password only (print/copy restrictions) | opens without a password | extracts normally | `extract.test.ts` |
 | Corrupted or truncated | `InvalidPDFException` / parse error | `pdf_corrupted` | `extract.test.ts` |
-| Scanned, no text layer | average < 20 non-space chars per page over all pages | `pdf_no_text` | `extract.test.ts` |
+| Scanned, no text layer | average < 25 non-space chars per page over all pages | `pdf_no_text` | `extract.test.ts` |
 | Partly scanned | some pages < 20 chars | extracts; notice "N pages had no text" | `extract.test.ts` |
 | Huge page count | `numPages > MAX_PDF_PAGES` (2,000) | `pdf_too_many_pages` before extraction | `extract.test.ts` |
-| Slow extraction | 240 s budget inside the 300 s function limit | `pdf_timeout` error line; nothing stored | `extract.test.ts` (fake clock) |
+| Slow extraction | 55 s budget inside the 60 s function limit | `pdf_timeout` error line; nothing stored | `extract.test.ts` (fake clock) |
 | Non-Latin text (Arabic, CJK, Cyrillic, Devanagari) | — | text kept as Unicode; no ASCII folding | `extract.test.ts` with 4 fixtures |
 | Ligatures (ﬁ ﬂ ﬀ ﬃ ﬄ ﬅ ﬆ) | U+FB00–U+FB06 | mapped to letters; Arabic presentation forms (U+FB50–U+FDFF, U+FE70–U+FEFF) NFKC-normalized per range only, so other text is untouched | `normalize.test.ts` |
 | Hyphenation at line ends | `-\n` followed by a lowercase letter | joined ("exam-\nple" → "example"); a hyphen before a capital or digit stays | `normalize.test.ts` |
@@ -375,7 +376,7 @@ Trust model: usage arrives from the browser, so it is **advisory**. The authorit
 | T-06 | SSRF or parameter injection via the YouTube URL | strict host allowlist, 11-char id regex, canonical URL rebuilt, raw input never fetched | `parse-url.test.ts` |
 | T-07 | Blob pathname tampering (read or delete someone else's upload) | token route issues `uploads/{nonce}.pdf` with `addRandomSuffix`; `tokenPayload` holds a nonce bound to the client IP hash; ingest requires the pathname prefix and nonce to match; private store | `upload/token.test.ts`, `ingest-pdf route.test.ts` |
 | T-08 | Upload abuse fills Blob quota (30-day lock-out) | per-IP and global upload limits, 5 min `validUntil`, delete after ingest, daily cron deletes blobs older than 1 h | `upload/token.test.ts`, `cron/cleanup.test.ts` |
-| T-09 | Malicious PDF (parser bombs, huge streams) | 25 MB cap, page cap, 240 s budget, pdf.js with `isEvalSupported: false`, no font or JS execution | `extract.test.ts` |
+| T-09 | Malicious PDF (parser bombs, huge streams) | 25 MB cap, page cap, 55 s budget, at most 2 extractions at once per instance, no font or JS execution (this pdf.js build has no eval path) | `extract.test.ts` |
 | T-10 | Hostile caption XML (entity expansion, XXE) | hand-written parser for the flat `<text>` format; DTDs and entity declarations rejected; only the five XML entities and numeric refs decoded | `captions-xml.test.ts` |
 | T-11 | XSS through document text or titles | text rendered as React text nodes only; no `dangerouslySetInnerHTML`; lint rule | `text-preview.test.tsx` |
 | T-12 | Upstream error messages or stack traces leak | AppError mapping; unknown errors become `internal`; details go to server logs only | `http/route-helper.test.ts` |

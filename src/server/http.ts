@@ -16,12 +16,16 @@ export function handle(handler: Handler) {
       res.headers.set("x-request-id", requestId);
       return res;
     } catch (err) {
-      const { status, body } = toErrorResult(err, requestId);
+      const { status, body, headers } = toErrorResult(err, requestId);
       // Details stay in server logs; the client gets the mapped body only.
       console.error(`[${requestId}] ${body.error.code}`, err);
       return Response.json(body, {
         status,
-        headers: { "x-request-id": requestId, "cache-control": "no-store" },
+        headers: {
+          "x-request-id": requestId,
+          "cache-control": "no-store",
+          ...headers,
+        },
       });
     }
   };

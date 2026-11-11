@@ -31,8 +31,8 @@ src/
     api/
       health/route.ts               GET  liveness, build sha, state driver (no secrets)
       limits/route.ts               GET  voice enabled? reason code if a guard is tripped
-      upload/route.ts               POST Blob client-upload token (handleUpload)
-      ingest/pdf/route.ts           POST {pathname, nonce} or multipart → NDJSON
+      upload/token/route.ts         POST Blob client-upload token (handleUpload)
+      ingest/pdf/route.ts           POST {blobUrl, fileName?} (blob) or multipart "file" (direct) → NDJSON
       ingest/youtube/route.ts       POST {url, lang?} → NDJSON
       documents/[id]/route.ts       GET  stored document (meta + pages), for reload and retries
       session/route.ts              POST {documentId, mode, reconnect?} → client secret + coverage
@@ -60,8 +60,8 @@ src/
       rate-limiter/{types,memory,upstash}.ts
       usage-ledger/{types,memory,upstash}.ts
       index.ts                      picks memory or upstash from env.STATE_DRIVER
-    upload/                         Blob token policy, nonce, direct multipart reader
-    pdf/                            validate, extract (unpdf), normalize, ingest service
+    ingest/pdf/                     validate, extract (unpdf), normalize, stream, blob, multipart reader, token policy
+    context/budget.ts               token count and the CONTEXT_TOKEN_BUDGET cut
     youtube/
       parse-url.ts                  reference §4 parser
       provider.ts                   TranscriptProvider interface + typed results
@@ -99,8 +99,8 @@ Every handler follows the same shape: `parse(zodSchema)`, then one service call,
 |---|---|---|---|
 | `GET /api/health` | — | `{ ok, sha, driver }` | — |
 | `GET /api/limits` | — | `{ voice: "ok" \| budget code }` | read-only |
-| `POST /api/upload` | `HandleUploadBody` | Blob token JSON | upload limits (IP + global) |
-| `POST /api/ingest/pdf` | `{ pathname, nonce }` (blob) or multipart `file` (direct) | NDJSON | ingest limit |
+| `POST /api/upload/token` | `generate-client-token` event only | Blob token JSON | token limit per IP (10/min) |
+| `POST /api/ingest/pdf` | `{ blobUrl, fileName? }` (blob) or multipart `file` (direct) | NDJSON | ingest limit per IP (10/min) |
 | `POST /api/ingest/youtube` | `{ url, lang? }` | NDJSON | ingest limit; Supadata guard |
 | `GET /api/documents/[id]` | `id` (base64url, 22 chars) | `{ meta, pages[] }` (streamed when large) | read limit |
 | `POST /api/session` | `{ documentId, mode: "voice" \| "text", reconnect?: { sessionId, transcript[] } }` | `{ clientSecret, expiresAt, sessionId, model, coverage, limits: { maxSeconds, idleSeconds } }` | all budget guards |
@@ -111,14 +111,18 @@ Every handler follows the same shape: `parse(zodSchema)`, then one service call,
 
 One JSON object per line, `Content-Type: application/x-ndjson`:
 
+PDF (M2). Lines are told apart by their keys; schemas are in `src/lib/wire/ingest.ts`:
+
 ```
-{"type":"meta","documentId":"…","source":"pdf","title":"…","unitCount":120,"unitKind":"page"}
-{"type":"unit","index":1,"label":"[Page 1]","text":"…"}
+{"documentId":"…","title":"…","sourceType":"pdf","pages":120}
+{"page":1,"text":"…"}
 …
-{"type":"done","stats":{"chars":412345,"tokens":98765,"emptyUnits":3,"lang":null,"autoCaptions":false}}
+{"done":true,"stats":{"pages":120,"words":2400,"tokens":3830},"coverage":1}
 ```
 
-On failure after the stream started: `{"type":"error","code":"pdf_timeout"}` and the stream closes. The client treats a stream that ends without `done` or `error` as a network break and retries with the same idempotency key (PDF: blob pathname; YouTube: `videoId+lang`). Streaming keeps big documents clear of the 4.5 MB response cap.
+Pages go out as each one is read. Stats and coverage need every page, so they are on the `done` line, not the first one; that is what puts the first page on the wire in about 0.3 s on the 120-page sample instead of after the whole file. Anything the server can refuse before reading a page (size, type, rate limit, password, damaged file, page count) is a normal JSON error with its HTTP status, before the stream starts.
+
+On failure after the stream started: `{"error":{"code":"pdf_timeout","message":"…"}}` and the stream closes (a scan with no text layer is found at the end and ends this way; nothing is stored). A stream that ends without `done` or `error` is a network break. The M3 YouTube lines will follow the same framing. Idempotent retry (SPEC §5.1) is not built yet: in blob mode the blob is deleted as soon as it is read, so a retry means uploading again. Streaming keeps big documents clear of the 4.5 MB response cap.
 
 ## 4. State and storage
 

@@ -60,12 +60,12 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 **Scope**
 - Add `unpdf` (serverless pdf.js with per-page text) and `@vercel/blob` (browser-direct upload past the 4.5 MB body cap).
-- `src/server/pdf/validate.ts`: size, empty, `%PDF-` magic bytes.
-- `src/server/pdf/extract.ts`: unpdf per page; page cap 2,000; 240 s budget; mapping of `PasswordException` and invalid-PDF errors; scanned and partial-text detection.
-- `src/server/pdf/normalize.ts`: ligatures, per-range Arabic presentation forms, end-of-line hyphenation, whitespace and control chars.
+- `src/server/ingest/pdf/validate.ts`: size, empty, `%PDF-` magic bytes.
+- `src/server/ingest/pdf/extract.ts`: unpdf, one page at a time; page cap 2,000; 55 s budget; at most 2 extractions at once; mapping of `PasswordException` and invalid-PDF errors; scanned and partial-text detection.
+- `src/server/ingest/pdf/normalize.ts`: ligatures, per-range Arabic presentation forms, end-of-line hyphenation, whitespace and control chars.
 - `src/server/upload`: Blob token policy (`application/pdf`, 25 MB, `addRandomSuffix`, 5 min `validUntil`, nonce in `tokenPayload`) and the direct multipart reader with a streaming 25 MB abort.
 - Ingest service: idempotency key, stream NDJSON (`meta`, `unit`…, `done` or `error`), save to DocumentStore, delete the blob in `finally`.
-- Routes `POST /api/upload`, `POST /api/ingest/pdf`, `GET /api/documents/[id]`, with `runtime = "nodejs"`, `maxDuration = 300`, no `dynamic` export.
+- Routes `POST /api/upload/token` and `POST /api/ingest/pdf` with `maxDuration = 60` and no `runtime` or `dynamic` export (both are rejected under Cache Components). `GET /api/documents/[id]` and the idempotent retry move to a later milestone.
 - `scripts/make-fixtures.ts` builds text, multi-language, ligature, hyphenation, empty-page and 2,001-page PDFs. Committed binaries cover encrypted, owner-password-only, corrupted and scanned files. Each fixture's source is noted in `test/fixtures/README.md`.
 - Private Blob store created for previews with the RW token; CSP adds the upload host.
 

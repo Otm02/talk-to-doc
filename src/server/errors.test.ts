@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { EnvError } from "./env";
-import { AppError, toErrorResult } from "./errors";
+import { AppError, catalogError, toErrorResult } from "./errors";
 
 describe("toErrorResult", () => {
   it("maps AppError to its status and copy", () => {
@@ -50,5 +50,41 @@ describe("toErrorResult", () => {
   it("keeps the cause on AppError for logs", () => {
     const cause = new Error("boom");
     expect(new AppError("internal", "x", 500, cause).cause).toBe(cause);
+  });
+
+  it("builds errors from the catalog with their status and copy", () => {
+    const err = catalogError("pdf_encrypted");
+    expect(err).toBeInstanceOf(AppError);
+    expect(err.httpStatus).toBe(422);
+    expect(err.userMessage).toBe(
+      "This PDF is password-protected. Remove the password and try again.",
+    );
+    expect(catalogError("pdf_timeout", { cause: "x" }).cause).toBe("x");
+  });
+
+  it("maps a retry delay to a Retry-After header", () => {
+    const r = toErrorResult(
+      catalogError("rate_limited", { retryAfterSeconds: 42 }),
+      "req-6",
+    );
+    expect(r.status).toBe(429);
+    expect(r.headers).toEqual({ "retry-after": "42" });
+  });
+
+  it("sends no extra headers for ordinary errors", () => {
+    expect(
+      toErrorResult(catalogError("pdf_empty"), "req-7").headers,
+    ).toBeUndefined();
+  });
+
+  it("uses the shared copy for zod and unknown failures", () => {
+    const bad = z.object({ a: z.string() }).safeParse({});
+    if (bad.success) throw new Error("expected failure");
+    expect(toErrorResult(bad.error, "r").body.error.message).toBe(
+      "Something was wrong with that request. Reload and try again.",
+    );
+    expect(toErrorResult(new Error("x"), "r").body.error.message).toBe(
+      "Something went wrong on our side. Try again.",
+    );
   });
 });

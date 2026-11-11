@@ -7,6 +7,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
+      "@test": path.resolve(import.meta.dirname, "test"),
       // The real package throws outside the Next server bundle.
       "server-only": path.resolve(
         import.meta.dirname,
