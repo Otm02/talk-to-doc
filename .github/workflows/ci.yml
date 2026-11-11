@@ -15,7 +15,7 @@ concurrency:
 # No secrets are passed to any step. CI never receives the OpenAI key.
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -27,8 +27,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm build
+      # The runner's apt indexes can point at a stale or unreachable mirror
+      # (a run failed resolving azure.archive.ubuntu.com), so refresh first.
+      - run: sudo apt-get update
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e --project=chromium
+      # Only chromium is installed; the webkit project would fail to launch.
+      - run: pnpm exec playwright test --project=chromium
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
