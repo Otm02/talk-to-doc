@@ -13,7 +13,7 @@ ingest UI ── PUT file ──────────────────
                   ◄── NDJSON stream ──── └─► DocumentStore ──────────────────────► Upstash Redis
           ── POST /api/ingest/youtube ─► youtube service ── direct ──────────────► youtube.com
                   ◄── NDJSON stream ──── └─ fallback ────────────────────────────► Supadata
-voice UI  ── POST /api/session ────────► session service ── client_secrets ──────► OpenAI
+voice UI  ── POST /api/realtime/session ────────► session service ── client_secrets ──────► OpenAI
           ── SDP offer ─────────────────────────────────────────────────────────► OpenAI /v1/realtime/calls
           ◄═ WebRTC audio + "oai-events" data channel ══════════════════════════► OpenAI Realtime
 ```
@@ -101,7 +101,7 @@ Every handler follows the same shape: `parse(zodSchema)`, then one service call,
 | `POST /api/ingest/pdf` | `{ blobUrl, fileName? }` (blob) or multipart `file` (direct) | NDJSON | ingest limit per IP (10/min) |
 | `POST /api/ingest/youtube` | `{ url, lang? }` | NDJSON | ingest limit; Supadata guard |
 | `GET /api/documents/[id]` | `id` (base64url, 22 chars) | `{ meta, pages[] }` (streamed when large) | read limit |
-| `POST /api/session` | `{ documentId, mode: "voice" \| "text", reconnect?: { sessionId, transcript[] } }` | `{ clientSecret, expiresAt, sessionId, model, coverage, limits: { maxSeconds, idleSeconds } }` | `VOICE_ENABLED`, per-IP limit, `DAILY_SESSION_CAP`; OpenAI quota or billing error → 503 `budget_exhausted` |
+| `POST /api/realtime/session` | `{ documentId, history?: [{ role: "user" \| "assistant", text }] }` | `{ clientSecret, expiresAt, model }` (`expiresAt` is unix seconds, as OpenAI sends it) | `VOICE_ENABLED`, per-IP limit (5 per 10 min), `DAILY_SESSION_CAP` (counted only after a successful mint); OpenAI quota or billing error → 503 `budget_exhausted` |
 | `GET /api/cron/cleanup` | header `Authorization: Bearer CRON_SECRET` | `{ deleted }` | Vercel cron only |
 
 ### NDJSON ingest protocol
@@ -231,7 +231,7 @@ sequenceDiagram
     autonumber
     actor U as User
     participant B as Browser
-    participant SE as /api/session
+    participant SE as /api/realtime/session
     participant G as Guard
     participant DS as DocumentStore
     participant OA as OpenAI
@@ -269,7 +269,7 @@ sequenceDiagram
     autonumber
     participant H as Hook and reducer
     participant T as WebRTC transport
-    participant SE as /api/session
+    participant SE as /api/realtime/session
     participant OA as OpenAI
     T-->>H: ICE state disconnected
     H->>H: start 5 s grace timer

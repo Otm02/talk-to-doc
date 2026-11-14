@@ -43,6 +43,11 @@ export interface RateLimiter {
    * day's count stays within `cap`. Used for DAILY_SESSION_CAP.
    */
   countDaily(key: string, cap: number): Promise<DailyCountResult>;
+  /**
+   * Hits so far today (UTC) without counting one. Lets a caller refuse at the
+   * cap up front and count only once the guarded work has succeeded.
+   */
+  peekDaily(key: string): Promise<number>;
 }
 
 export interface StateAdapters {

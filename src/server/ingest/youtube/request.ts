@@ -121,6 +121,8 @@ export async function ingestYoutube(
     sourceType: "youtube",
     videoId,
     title,
+    durationSec: Math.round(transcript.durationSec),
+    language: transcript.language,
     context,
     stats,
     coverage,

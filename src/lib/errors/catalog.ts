@@ -16,6 +16,32 @@ export const ERROR_CATALOG = {
     status: 429,
     message: "Too many tries. Wait a minute and try again.",
   },
+  // Session minting (M5). Copy mirrors docs/SPEC.md sections 4.2 and 4.3.
+  voice_disabled: {
+    status: 503,
+    message: "Voice is paused right now; the extracted text still works.",
+  },
+  daily_limit: {
+    status: 429,
+    message: "The demo's voice sessions for today are used up.",
+  },
+  doc_not_found: {
+    status: 404,
+    message: "We couldn't find that document. Please add the source again.",
+  },
+  budget_exhausted: {
+    status: 503,
+    message:
+      "The demo's API budget is used up; the extracted text still works.",
+  },
+  session_connect_failed: {
+    status: 502,
+    message: "Couldn't connect to voice chat. Try again.",
+  },
+  session_upstream_busy: {
+    status: 503,
+    message: "The voice service is busy. Try again in a moment.",
+  },
   pdf_too_large: {
     status: 413,
     message: "This PDF is over 25 MB. Try a smaller file.",
