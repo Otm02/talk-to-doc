@@ -4,8 +4,8 @@
 //
 // Talks to YouTube only (no OpenAI, no Supadata). What is kept is real; what is
 // removed is noise or per-request identity:
-//   - watch page: reduced to the one line the provider reads (the public
-//     InnerTube web key). The full page is over 1 MB of per-visit tokens.
+//   - watch page: reduced to the one line the provider reads, with a placeholder
+//     where the public InnerTube web key goes. The full page is over 1 MB of per-visit tokens.
 //   - player JSON: playability, a few videoDetails fields and the caption
 //     tracks, with each track's signed baseUrl (it carries the requester's IP)
 //     replaced by a plain timedtext URL. streamingData and tracking are gone.
@@ -32,6 +32,10 @@ const TARGETS: Target[] = [
   { dir: "unavailable", videoId: "KmtzQCSh6xk", languages: [] },
 ];
 
+// YouTube's web key is public (every watch page carries it), but it looks like
+// a leaked Google API key to secret scanners. The provider only echoes it into
+// a URL, so a placeholder tests the same thing.
+const FIXTURE_API_KEY = "TEST_PLACEHOLDER_KEY";
 const HEADERS = { "accept-language": "en-US" };
 const OUT = new URL("../test/fixtures/youtube/", import.meta.url);
 
@@ -58,7 +62,7 @@ async function record(target: Target): Promise<void> {
   if (!apiKey) throw new Error(`${videoId}: no InnerTube key (blocked?)`);
   await writeFile(
     new URL("watch.html", outDir),
-    `<!doctype html><html><head><script>ytcfg.set({"INNERTUBE_API_KEY":"${apiKey}"});</script></head><body></body></html>\n`,
+    `<!doctype html><html><head><script>ytcfg.set({"INNERTUBE_API_KEY":"${FIXTURE_API_KEY}"});</script></head><body></body></html>\n`,
   );
 
   const res = await fetch(

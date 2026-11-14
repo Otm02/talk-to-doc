@@ -30,4 +30,4 @@ Real responses from YouTube, recorded once on a home IP by `scripts/record-youtu
 | `disabled/`    | `dMH0bHeiRNg` "Evolution of Dance"    | playable, no `captionTracks`                  | `NO_CAPTIONS`                            |
 | `unavailable/` | `KmtzQCSh6xk`                         | `playabilityStatus` `ERROR`                   | `VIDEO_UNAVAILABLE`                      |
 
-Each folder has `watch.html` (reduced to the public InnerTube key line), `player.json` (scrubbed: tracking tokens gone, caption `baseUrl`s rewritten because the real ones carry the requester's IP and a signature) and the caption XML as YouTube returned it.
+Each folder has `watch.html` (reduced to the one line the provider reads, with a placeholder for the public InnerTube key so secret scanners stay quiet), `player.json` (scrubbed: tracking tokens gone, caption `baseUrl`s rewritten because the real ones carry the requester's IP and a signature) and the caption XML as YouTube returned it.
