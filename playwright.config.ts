@@ -24,6 +24,8 @@ export default defineConfig({
       NEXT_PUBLIC_REALTIME_TRANSPORT: "mock",
       // Keep e2e hermetic: never inherit real keys or a hosted state backend.
       OPENAI_API_KEY: "",
+      // The YouTube route must never reach a real provider from e2e.
+      SUPADATA_API_KEY: "",
       UPSTASH_REDIS_REST_URL: "",
       UPSTASH_REDIS_REST_TOKEN: "",
       KV_REST_API_URL: "",
