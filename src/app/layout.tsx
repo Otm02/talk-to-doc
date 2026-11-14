@@ -28,6 +28,10 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      // Browser extensions (e.g. analytics opt-out add-ons) add attributes to
+      // <html> before React hydrates. This only silences attribute mismatches
+      // on this one element, not on anything inside it.
+      suppressHydrationWarning
     >
       <body>
         <AppShell>{children}</AppShell>
