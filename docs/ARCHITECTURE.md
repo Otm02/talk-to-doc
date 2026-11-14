@@ -16,10 +16,9 @@ ingest UI ── PUT file ──────────────────
 voice UI  ── POST /api/session ────────► session service ── client_secrets ──────► OpenAI
           ── SDP offer ─────────────────────────────────────────────────────────► OpenAI /v1/realtime/calls
           ◄═ WebRTC audio + "oai-events" data channel ══════════════════════════► OpenAI Realtime
-          ── POST /api/usage ──────────► usage service ── UsageLedger ────────────► Upstash Redis
 ```
 
-The browser talks to OpenAI directly for media, using a 60 s client secret minted by our server. The server never proxies audio and never sees the data channel. That is why usage is reported by the client and treated as advisory (SPEC §7.4).
+The browser talks to OpenAI directly for media, using a 60 s client secret minted by our server. The server never proxies audio and never sees the data channel. That is why the server keeps no spend accounting: OpenAI's hard limit on the key is the backstop, and the client only shows a dev-only cost estimate from `response.done` events (SPEC §7).
 
 ## 2. Module map
 
@@ -30,13 +29,12 @@ src/
     d/[id]/page.tsx                 document + chat screen
     api/
       health/route.ts               GET  liveness, build sha, state driver (no secrets)
-      limits/route.ts               GET  voice enabled? reason code if a guard is tripped
+      limits/route.ts               GET  voice enabled? reason code if a guard is tripped (kill switch, daily cap)
       upload/token/route.ts         POST Blob client-upload token (handleUpload)
       ingest/pdf/route.ts           POST {blobUrl, fileName?} (blob) or multipart "file" (direct) → NDJSON
       ingest/youtube/route.ts       POST {url, lang?} → NDJSON
       documents/[id]/route.ts       GET  stored document (meta + pages), for reload and retries
       session/route.ts              POST {documentId, mode, reconnect?} → client secret + coverage
-      usage/route.ts                POST {sessionId, reports[], final?} → priced into the ledger
       cron/cleanup/route.ts         GET  daily: delete orphan blobs (CRON_SECRET)
   features/                         client code, grouped by feature
     ingest/                         source switch, file picker, URL field, upload client, NDJSON reader
@@ -48,8 +46,9 @@ src/
         mock-transport.ts           scriptable, replays recorded fixtures (tests, e2e)
         events.ts                   zod schemas for GA server events; unknown types → ignored
         reducer.ts                  pure state machine + transcript model
-        use-realtime-session.ts     the one hook: mint, connect, events, usage, timers, cleanup
+        use-realtime-session.ts     the one hook: mint, connect, events, timers, cleanup
       ui/                           status pill, transcript, controls, composer, mic meter
+      dev-cost/                     dev-only overlay: price table, tokens and cost from response.done; never reported
   server/                           server-only (import "server-only"); never imported by client code
     env.ts                          the only reader of process.env; zod schema
     errors/                         AppError (code from the catalog, cause kept for logs)
@@ -57,8 +56,7 @@ src/
     log.ts                          structured logger with redaction
     adapters/
       document-store/{types,memory,upstash}.ts
-      rate-limiter/{types,memory,upstash}.ts
-      usage-ledger/{types,memory,upstash}.ts
+      rate-limiter/{types,memory,upstash}.ts   sliding window + daily fixed-window counter
       index.ts                      picks memory or upstash from env.STATE_DRIVER
     ingest/pdf/                     validate, extract (unpdf), normalize, stream, blob, multipart reader, token policy
     context/budget.ts               token count and the CONTEXT_TOKEN_BUDGET cut
@@ -66,15 +64,14 @@ src/
       parse-url.ts                  reference §4 parser
       provider.ts                   TranscriptProvider interface + typed results
       direct.ts                     InnerTube fetcher (consent, player, track pick, XML)
-      supadata.ts                   Supadata adapter (M12)
+      supadata.ts                   Supadata adapter
       fixture.ts                    deterministic provider for e2e; refuses production
       chain.ts                      ordered fall-through on retryable failures only
       service.ts                    cache, sectioning into ~5 min units, NDJSON
     context/                        token count, budget, markers, fences, coverage
     realtime/                       client-secrets adapter, session config builder
-    pricing/                        price table, cost(usage), reservation estimate
-    guard/                          kill switch, IP limits, daily/total caps, reservation
-    session/                        session service (guard → context → mint → record)
+    guard/                          kill switch, IP limit, DAILY_SESSION_CAP
+    session/                        session service (guard → context → mint)
   lib/                              client-safe shared code
     errors/catalog.ts               code → status, copy, retry action
     wire/                           zod schemas for request/response bodies and NDJSON lines
@@ -98,13 +95,12 @@ Every handler follows the same shape: `parse(zodSchema)`, then one service call,
 | Route | Input (zod) | Output | Guards |
 |---|---|---|---|
 | `GET /api/health` | — | `{ ok, sha, driver }` | — |
-| `GET /api/limits` | — | `{ voice: "ok" \| budget code }` | read-only |
+| `GET /api/limits` | — | `{ voice: "ok" \| budget code }` | read-only; kill switch and daily cap only |
 | `POST /api/upload/token` | `generate-client-token` event only | Blob token JSON | token limit per IP (10/min) |
 | `POST /api/ingest/pdf` | `{ blobUrl, fileName? }` (blob) or multipart `file` (direct) | NDJSON | ingest limit per IP (10/min) |
 | `POST /api/ingest/youtube` | `{ url, lang? }` | NDJSON | ingest limit; Supadata guard |
 | `GET /api/documents/[id]` | `id` (base64url, 22 chars) | `{ meta, pages[] }` (streamed when large) | read limit |
-| `POST /api/session` | `{ documentId, mode: "voice" \| "text", reconnect?: { sessionId, transcript[] } }` | `{ clientSecret, expiresAt, sessionId, model, coverage, limits: { maxSeconds, idleSeconds } }` | all budget guards |
-| `POST /api/usage` | `{ sessionId, reports: Usage[], final? }` | `{ ok }` | session must exist; caps on report size |
+| `POST /api/session` | `{ documentId, mode: "voice" \| "text", reconnect?: { sessionId, transcript[] } }` | `{ clientSecret, expiresAt, sessionId, model, coverage, limits: { maxSeconds, idleSeconds } }` | `VOICE_ENABLED`, per-IP limit, `DAILY_SESSION_CAP`; OpenAI quota or billing error → 503 `budget_exhausted` |
 | `GET /api/cron/cleanup` | header `Authorization: Bearer CRON_SECRET` | `{ deleted }` | Vercel cron only |
 
 ### NDJSON ingest protocol
@@ -129,10 +125,9 @@ On failure after the stream started: `{"error":{"code":"pdf_timeout","message":"
 | Adapter | Memory impl (local, tests) | Upstash impl (Vercel) |
 |---|---|---|
 | DocumentStore | `Map` with TTL | `ttd:doc:{id}:meta` (JSON) + `ttd:doc:{id}:b:{k}` blocks of ≤ 512 KB of units, TTL 2 h (YouTube 24 h); `ttd:ingest:{key}` → id; `ttd:yt:{videoId}:{lang}` → id |
-| RateLimiter | sliding window over timestamps | `@upstash/ratelimit` sliding window, prefix `ttd:rl:{name}`, `analytics: false`, 2 s timeout, **fail closed** for mint and upload, fail open for reads |
-| UsageLedger | counters | `INCRBYFLOAT ttd:usd:day:{date}` and `ttd:usd:total`; `INCR ttd:sessions:day:{date}`; `ttd:session:{id}` (JSON: ipHash, model, reserved, reported, docId) TTL 1 h; `ttd:latch:voice_off` TTL 1 h |
+| RateLimiter | sliding window over timestamps; daily counter in a `Map` keyed by UTC date | `@upstash/ratelimit` sliding window, prefix `ttd:rl:{name}`, `analytics: false`, 2 s timeout, **fail closed** for mint and upload, fail open for reads; daily session counter is `INCR ttd:daily:{key}:{date}` with a 48 h TTL |
 
-The reservation is pre-charged at mint time (`+reserved`) and reconciled on the final usage report (`+(reported − reserved)`). A session that never reports keeps its full reservation. Blocks rather than per-page keys keep a 2,000-page PDF to a handful of Redis commands, under the free plan's 500K/month and 10 MB per request.
+Blocks rather than per-page keys keep a 2,000-page PDF to a handful of Redis commands, under the free plan's 500K/month and 10 MB per request.
 
 ## 5. Sequence diagrams
 
@@ -215,7 +210,7 @@ sequenceDiagram
     end
 ```
 
-The chain order comes from `YOUTUBE_PROVIDERS` (for example `direct,supadata` locally after M12, `supadata` on Vercel if the direct attempt only adds latency there; measured in M12).
+The chain order comes from `YOUTUBE_PROVIDERS` (for example `direct,supadata` locally, `supadata` on Vercel if the direct attempt only adds latency there; measured in M3).
 
 ### 5.3 Session start with the ephemeral token
 
@@ -231,16 +226,16 @@ sequenceDiagram
     U->>B: tap Start Voice Chat
     B->>B: getUserMedia inside the tap, unlock audio element
     B->>SE: POST documentId and mode
-    SE->>G: kill switch, IP limit, daily sessions, daily and total spend
+    SE->>G: kill switch, IP limit, daily session cap
     alt any guard trips
         G-->>SE: budget code
         SE-->>B: error with exact copy
     else allowed
-        G->>G: pre-charge reservation, create session record
         SE->>DS: load document
         SE->>SE: build fenced instructions within the token budget
         SE->>OA: POST /v1/realtime/client_secrets with model, instructions, audio config
-        OA-->>SE: value and expires_at
+        OA-->>SE: value and expires_at, or a quota or billing error
+        Note over SE,B: billing error maps to 503 budget_exhausted, never retried
         SE-->>B: client secret, sessionId, coverage, limits
         B->>B: create peer connection, mic track, oai-events channel, offer
         B->>OA: POST /v1/realtime/calls with SDP offer
@@ -250,9 +245,8 @@ sequenceDiagram
             B->>OA: mic audio
             OA-->>B: transcript deltas and model audio
             OA-->>B: response.done with usage
-            B->>SE: POST /api/usage with the usage block
+            B->>B: dev-only overlay adds the estimate, nothing is sent to the server
         end
-        B->>SE: POST /api/usage final, reconcile reservation
     end
 ```
 
@@ -320,7 +314,7 @@ stateDiagram-v2
     reconnecting --> error: 3 attempts failed
     live --> ending: end, max time, idle or hidden tab
     live --> error: fatal error event such as billing
-    ending --> ended: tracks stopped, usage final sent
+    ending --> ended: tracks stopped
     error --> minting: retry
     ended --> idle: start again
 ```
@@ -347,15 +341,13 @@ Validated lazily in `src/server/env.ts` (first request, not build). Secrets are 
 | `DOC_TTL_MINUTES` | | 120 | |
 | `UPLOAD_MODE` | | `direct` locally, `blob` on Vercel | `direct` refused on Vercel |
 | `VOICE_ENABLED` | | true | kill switch |
-| `DAILY_SESSION_CAP` | | 40 | |
-| `DAILY_SPEND_LIMIT_USD` | | 3 | |
-| `ADMIN_TOKEN` | S | none | optional |
+| `DAILY_SESSION_CAP` | | 40 | session starts per UTC day, counted in RateLimiter |
 | `BLOB_READ_WRITE_TOKEN` | S | none | set by the Blob integration |
 | `UPSTASH_REDIS_REST_URL` / `KV_REST_API_URL` | S | none | both names accepted |
 | `UPSTASH_REDIS_REST_TOKEN` / `KV_REST_API_TOKEN` | S | none | set together with the URL |
 | `NEXT_PUBLIC_REALTIME_TRANSPORT` | | `webrtc` | `mock` in e2e |
 
-The state driver is inferred: Upstash variables present means `upstash`, otherwise `memory`. On Vercel (`VERCEL` or `VERCEL_ENV` set) the Upstash variables are required and `UPLOAD_MODE=direct` is refused, so a misconfigured preview fails loudly. `SPEND_LIMIT_USD`, `IP_HASH_SALT`, `CRON_SECRET` and `YOUTUBE_PROVIDERS` from the earlier draft move to the milestones that use them.
+The state driver is inferred: Upstash variables present means `upstash`, otherwise `memory`. On Vercel (`VERCEL` or `VERCEL_ENV` set) the Upstash variables are required and `UPLOAD_MODE=direct` is refused, so a misconfigured preview fails loudly. `IP_HASH_SALT`, `CRON_SECRET` and `YOUTUBE_PROVIDERS` from the earlier draft move to the milestones that use them.
 
 Next 16 note: with `cacheComponents`, `export const runtime` is a build error. Route handlers run on Node by default, so they export nothing.
 
@@ -369,13 +361,13 @@ Next 16 note: with `cacheComponents`, `export const runtime` is a build error. R
 | Stream ingest as NDJSON | One JSON response; SSE | Streamed responses are exempt from the 4.5 MB cap; NDJSON is trivial to parse with `fetch` and a reader, works as a POST (SSE `EventSource` is GET-only), and lets the preview fill as pages arrive |
 | unpdf for extraction | pdf-parse; pdfjs-dist directly | unpdf ships a serverless build of pdf.js with no worker or canvas setup, gives per-page text for `[Page n]` markers, and surfaces pdf.js exceptions (password, invalid) we map to codes. pdf-parse is unmaintained and merges pages |
 | Ephemeral client secret, browser to OpenAI over WebRTC | Unified `/v1/realtime/calls` with our server in the SDP path; WebSocket relay | The brief's model: the key stays on the server, media goes peer-to-peer with low latency, and no function holds a connection open (Hobby has no long-lived processes) |
-| No sideband WebSocket | Server attaches via `call_id` for authoritative usage | It would need a function alive for the whole chat; the 300 s limit is shorter than a 10-minute session. We use reservations and count caps instead (SPEC §7.4) |
+| No sideband WebSocket | Server attaches via `call_id` for authoritative usage | It would need a function alive for the whole chat; the 300 s limit is shorter than a 10-minute session. We use count caps, per-IP limits and OpenAI's hard limit instead (SPEC §7.4) |
 | Instructions built on the server from DocumentStore | Client sends the text | The client cannot inject instructions or swap the document; one place does fencing and the budget |
 | Server VAD (`semantic_vad`) with interrupt | Push-to-talk; `server_vad` | Natural barge-in for the interrupt step of the review; semantic VAD waits for a complete thought, so fewer accidental turns, which also saves money. Manual Stop covers noisy rooms |
 | Voice `marin` | other voices | Recommended by OpenAI for quality; locked after the first audio |
 | `gpt-4o-mini-transcribe` for user captions | `gpt-transcribe`; none | Cheapest model that works with VAD over WebRTC; `gpt-transcribe` is WebSocket-only for committed turns. Sunset 2027-02-26 is noted in the README |
-| Three adapters, memory or Upstash by env | Module memory; SQLite; Postgres | Functions do not share memory across instances. Upstash's free plan needs no card and is HTTP-based (no connection pool). Memory keeps tests fast and offline |
-| Pre-charged reservation plus client-reported usage | Trust reported usage; sideband | The server cannot see `response.done`. Reservations keep spend guards conservative whatever the client reports |
+| Two adapters (DocumentStore, RateLimiter), memory or Upstash by env | Module memory; SQLite; Postgres | Functions do not share memory across instances. Upstash's free plan needs no card and is HTTP-based (no connection pool). Memory keeps tests fast and offline |
+| OpenAI's hard limit on the key replaces a dollar ledger | Server-side UsageLedger with pre-charged reservations and client-reported usage; sideband | OpenAI billing already enforces the $20 cap, so a second ledger can only drift from it, costs Redis commands, and depends on usage the server cannot see (`response.done` stays in the browser). Cheap guards stay (model, context budget, kill switch, session length, per-IP limit, daily session cap). A billing error maps to 503 `budget_exhausted`. The dev-only client overlay is advisory and reports nothing. We accept having no server-side spend view |
 | YouTube provider chain: direct, then Supadata | Supadata only; a residential proxy; the YouTube Data API | Direct is free and works locally; YouTube blocks cloud IPs, so Supadata (free plan, no card) covers Vercel. Proxies cost money. The Data API only serves captions for videos you own |
 | Hand-written caption XML parser | fast-xml-parser; xml2js | The format is flat `<text start dur>` elements. A small parser that rejects DTDs avoids XXE and entity-expansion risk without a dependency |
 | No `middleware.ts` / `proxy.ts` | Middleware for headers and rate limits | Next buffers proxied request bodies at 10 MB, which would truncate local 25 MB direct uploads. Headers go in `next.config.ts`, limits in handlers |

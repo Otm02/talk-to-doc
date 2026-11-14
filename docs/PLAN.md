@@ -6,8 +6,8 @@ Status: v1, 2026-11-09. Requirements and IDs come from [SPEC.md](SPEC.md); modul
 
 | Risk | Retired in |
 |---|---|
-| $20 runs out mid-review | Guards in the env schema (M1); reservation and caps (M5); client timers (M6); cost model corrected from measured usage (M6); fail-closed limiter and total cap (M10); 2.1 switched on only after the numbers fit (M13) |
-| YouTube fails on the deployed app | Provider chain and cache (M3); block observed on a preview in M3; Supadata (M12) |
+| $20 runs out mid-review | OpenAI's hard $20 limit on the key is the backstop; cheap guards in the env schema (M1); kill switch, per-IP limit and daily session cap (M5); client timers and dev-only cost overlay (M6); cost model corrected from measured usage (M6); fail-closed limiter (M10); 2.1 switched on only after the numbers fit (M13) |
+| YouTube fails on the deployed app | Provider chain and cache (M3); block observed on a preview in M3; Supadata, folded in from the old M12 (M3) |
 | Live voice misbehaves on real phones | Live checkpoint that records fixtures and settles every UNVERIFIED API fact before UI work (M6); real-device checks (M7, M8) |
 | Instability on a poor network | `reconnecting` state from the first reducer (M6); full reconnect and retries (M9) |
 | PDF path breaks only when deployed | Vercel Git previews (M1); 20 MB Blob smoke test on a preview (M2) |
@@ -35,9 +35,9 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 **Scope**
 - Add dependencies, each with a one-line justification in the PR: `zod` (boundary validation), `server-only` (import guard), `vitest` + `@vitest/coverage-v8` (unit tests), `@testing-library/react` + `@testing-library/user-event` + `jsdom` (component tests), `@playwright/test` (e2e), `prettier` (format), shadcn/ui init + `lucide-react` (UI kit and icons).
 - Scripts: `check` (lint + typecheck + unit tests), `test`, `test:e2e`, `format`, `typecheck`.
-- `src/server/env.ts`: the full zod schema from ARCHITECTURE §8, including every budget guard and `SPEND_LIMIT_USD`. Cross-field rules: `memory` and `direct` refused when `VERCEL_ENV` is set; `fixture` provider refused in production; required secrets per mode.
+- `src/server/env.ts`: the full zod schema from ARCHITECTURE §8, including every cost guard (`REALTIME_MODEL`, `CONTEXT_TOKEN_BUDGET`, `VOICE_ENABLED`, `MAX_SESSION_MINUTES`, `DAILY_SESSION_CAP`). Cross-field rules: `memory` and `direct` refused when `VERCEL_ENV` is set; `fixture` provider refused in production; required secrets per mode.
 - `src/lib/errors/catalog.ts` with every code and copy from SPEC §4. `src/server/errors` AppError. `src/server/http` route helper (zod parse, AppError mapping, request id, salted IP hash). `src/server/log.ts` with redaction.
-- Adapter interfaces for DocumentStore, RateLimiter and UsageLedger, memory implementations, and one shared contract suite that every implementation must pass.
+- Adapter interfaces for DocumentStore and RateLimiter (sliding window plus a daily fixed-window counter keyed by UTC date), memory implementations, and one shared contract suite that every implementation must pass.
 - Security headers in `next.config.ts` (SPEC §8.1); CSP starts strict and gains hosts in later milestones.
 - `GET /api/health`. ESLint `no-restricted-imports` rules from ARCHITECTURE §2. `.env.example` with every variable and a comment.
 - GitHub Actions: install, `pnpm check`, `pnpm build`. Vercel project connected to the repo for Git preview deployments (no secrets yet, no OpenAI key on Vercel).
@@ -52,7 +52,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 **Tests**
 - [ ] `src/server/env.test.ts`: defaults (mini, 8k), invalid model rejected, `memory` refused on Vercel, `fixture` refused in production, secrets never in error text.
 - [ ] `src/server/http/route-helper.test.ts`: zod failure → `invalid_request`; AppError → catalog status and copy; unknown error → `internal` with no upstream message.
-- [ ] `src/server/adapters/*.contract.test.ts` against memory: TTL expiry, sliding window, ledger increments by day and total.
+- [ ] `src/server/adapters/*.contract.test.ts` against memory: TTL expiry, sliding window, daily counter (cap, independent keys, UTC day rollover).
 - [ ] `src/server/log.test.ts`: redaction of keys and tokens.
 - [ ] `next.config` headers test (CSP, HSTS, Permissions-Policy present).
 
@@ -83,7 +83,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - [ ] `ingest-service.test.ts`: NDJSON framing, error line after a partial stream, blob deleted on success and failure, idempotent retry.
 - [ ] `src/app/api/ingest/pdf/route.test.ts`: zod rejection, pathname prefix and nonce checks, direct mode refused on Vercel.
 
-## M3 YouTube pipeline
+## M3 YouTube pipeline (direct + Supadata, works deployed)
 
 **Scope**
 - `parse-url.ts` from reference §4, plus playlist, channel and `@handle` detection for `youtube_no_video_id`.
@@ -91,11 +91,18 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - `direct.ts`: watch page, consent wall, InnerTube key, ANDROID player request, `playabilityStatus` mapping (reference §2), live and upcoming detection, track pick order from SPEC §5.2, `&exp=xpe` check, caption fetch, hand-written XML parser that rejects DTDs. Every fetch has a timeout.
 - `fixture.ts` provider for e2e (refused in production).
 - Service: merge lines into ~30 s paragraphs with `[mm:ss]`, group into ~5-minute units, length cap, cache by `videoId+lang` with a 24 h TTL, NDJSON route `POST /api/ingest/youtube`.
+- `supadata.ts` (folded in from the old M12): `GET /v1/transcript` with the canonical URL, `mode=native`, `text=false` (timestamps), explicit 206 handling, defensive 202 job polling with a cap, error mapping from reference §3, 15 s timeout.
+- Global 1 req/s limiter and a monthly credit counter (`SUPADATA_MONTHLY_CAP`); `youtube_quota` when hit.
+- Measure on a preview and on production whether the direct provider ever succeeds from Vercel; set `YOUTUBE_PROVIDERS` for production from that measurement.
+- README: "YouTube on Vercel" section explaining the cloud-IP block, the chain, the cache and the free-plan limits.
 - Recorded fixtures (HTML, player JSON, caption XML) for each case, captured once locally, with tracking params removed.
 
 **Acceptance criteria**
 - [ ] Locally, a captioned public video loads with timestamps (MC-2).
-- [ ] On a preview, the same video yields a clean `youtube_blocked` error line (expected on cloud IPs), never a crash or upstream text.
+- [ ] On a preview, a direct-only chain yields a clean `youtube_blocked` error line (expected on cloud IPs), never a crash or upstream text; with Supadata in the chain the same video loads.
+- [ ] MC-7 passes on production: three captioned videos (long, non-English, auto-captions only).
+- [ ] A second paste of the same video makes no Supadata call.
+- [ ] Credits used during the review stay under the monthly cap by design.
 - [ ] Every YouTube edge case in SPEC §5.2 except Supadata-specific rows maps to its behavior.
 - [ ] Pasting the same video twice makes one upstream fetch.
 
@@ -105,6 +112,8 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - [ ] `pick-track.test.ts`: language preference order, manual before generated, same-code collision.
 - [ ] `captions-xml.test.ts`: entities, tags stripped, missing `dur`, empty lines skipped, DTD rejected, billion-laughs input rejected.
 - [ ] `chain.test.ts`: terminal stops, retryable falls through, all fail → last retryable code.
+- [ ] `supadata.test.ts`: recorded 200, 206, 202 then completed, 202 then failed, 400, 401, 402, 403, 404, 429, 500, 502, timeout.
+- [ ] `chain.test.ts` additions: direct blocked → Supadata ok; Supadata quota → `youtube_quota`.
 - [ ] `youtube-service.test.ts`: paragraphs and units, cap, cache hit.
 
 ## M4 Ingestion UI
@@ -134,10 +143,9 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 **Scope**
 - Add `gpt-tokenizer` (local token counts for the budget, with no API call).
 - `src/server/context`: token count, budget cap by whole units, last-unit cut, markers, `<reference_material>` fence with escaping, title sanitizing, `<conversation_so_far>` fence for reconnects, coverage object.
-- `src/server/pricing`: price table with fetch date, `cost(usage)`, transcription cost, `reservation(model, maxSeconds)`.
 - `src/server/realtime/client-secrets.ts`: adapter with 10 s timeout, typed errors (billing codes from reference §3, 4xx config, 5xx busy), never logs the key.
-- `src/server/guard`: kill switch and latch, IP limit (fail closed), daily sessions, daily and total spend including the pre-charge.
-- `src/server/session/service.ts` and `POST /api/session`; `POST /api/usage` (zod `Usage` schema, size caps, priced, recorded, final reconcile); `GET /api/limits`.
+- `src/server/guard`: kill switch, IP limit (fail closed), `DAILY_SESSION_CAP` via `RateLimiter.countDaily`.
+- `src/server/session/service.ts` and `POST /api/session` (enforces `VOICE_ENABLED`, the per-IP limit and `DAILY_SESSION_CAP`; maps OpenAI's quota or billing-limit error to 503 `budget_exhausted`); `GET /api/limits`.
 - **[LIVE: ask first, $0]** one mint to confirm the response shape; recorded as a fixture with the secret value replaced.
 
 **Acceptance criteria**
@@ -149,10 +157,9 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 **Tests**
 - [ ] `budget.test.ts`: under budget, exact fit, unit cut, single huge unit, empty document.
 - [ ] `build-instructions.test.ts`: fence shape, escaping variants (case, spaces), title sanitizing, reconnect fence and its cap, injection fixtures.
-- [ ] `pricing.test.ts`: the reference §4 example usage block priced by hand, cached-subset handling, both models, transcription.
 - [ ] `client-secrets.test.ts`: recorded 200, 400, 404, 429 with each billing code, 5xx, timeout.
-- [ ] `guard.test.ts`: every trip, reservation pre-charge and reconcile up and down, limiter timeout denies.
-- [ ] `src/app/api/session/route.test.ts`, `src/app/api/usage/route.test.ts`: zod, unknown session, oversized report.
+- [ ] `guard.test.ts`: every trip, limiter timeout denies, reconnect does not count against the daily cap.
+- [ ] `src/app/api/session/route.test.ts`: zod, unknown document, each guard code, billing error → 503 `budget_exhausted`.
 
 ## M6 Realtime engine
 
@@ -160,7 +167,8 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - `transport.ts` interface; `webrtc-transport.ts` (peer connection, `oai-events` channel created before the offer, mic track with echo cancellation, noise suppression and AGC, recvonly or silent track for text mode, `/v1/realtime/calls` exchange with `res.ok` check, ICE and channel state events); `mock-transport.ts` (scripted and fixture replay).
 - `events.ts`: zod schemas for every server event in reference §3; unknown types become `ignored`.
 - `reducer.ts`: the state machine in ARCHITECTURE §6, the transcript model ordered by `previous_item_id`, interruption marking, recoverable vs fatal errors.
-- `use-realtime-session.ts`: mint, connect, usage POSTs per `response.done` and per transcription `completed`, final reconcile, max-session, idle and hidden-tab timers, Stop (`response.cancel` then `output_audio_buffer.clear`), mute (`track.enabled`), send text, full cleanup.
+- `use-realtime-session.ts`: mint, connect, max-session, idle and hidden-tab timers, Stop (`response.cancel` then `output_audio_buffer.clear`), mute (`track.enabled`), send text, full cleanup.
+- Dev-only cost overlay (`src/features/voice/dev-cost`): price table with fetch date, estimates tokens and cost from `response.done` and transcription usage, tested by hand-priced fixtures; stripped from production, nothing reported to the server.
 - **[LIVE: ask first, ~2 min on mini, ~$0.05]** record real event logs into `test/fixtures/realtime/` and settle: the recvonly offer for no mic, `output_modalities` on `response.create`, the `/calls` success status and `Location` header, the error shape for billing. Update reference §2 and §3 and the cost model in SPEC §7.2 with measured numbers.
 
 **Acceptance criteria**
@@ -237,9 +245,9 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 **Scope**
 - Add `@upstash/redis` and `@upstash/ratelimit` (shared state on serverless, free plan).
-- Upstash implementations of the three adapters per ARCHITECTURE §4; the contract suite runs against Upstash only when local Upstash env is present (skipped in CI).
-- Apply the limits matrix to every handler; fail closed for mint and upload; the voice-off latch on OpenAI billing errors.
-- Final CSP; `SPEND_LIMIT_USD` wired end to end; `GET /api/cron/cleanup` with `CRON_SECRET` and a daily Vercel cron.
+- Upstash implementations of the two adapters per ARCHITECTURE §4; the contract suite runs against Upstash only when local Upstash env is present (skipped in CI).
+- Apply the limits matrix to every handler; fail closed for mint and upload.
+- Final CSP; `GET /api/cron/cleanup` with `CRON_SECRET` and a daily Vercel cron.
 - CI: gitleaks job; `scripts/check-bundle-secrets.ts` on the client build output; `pnpm audit` (warn).
 - Run `/security-review` and fix the findings; walk the SPEC §8.2 threat list and link each row's test.
 
@@ -250,7 +258,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 **Tests**
 - [ ] `*.contract.test.ts` for Upstash adapters (local only).
-- [ ] `guard.test.ts` additions: latch, limiter timeout, total cap with pre-charges.
+- [ ] `guard.test.ts` additions: limiter timeout, daily cap across a UTC day change.
 - [ ] `cron/cleanup.test.ts`: auth required, only `uploads/` older than 1 h deleted.
 - [ ] Bundle secret check fails on a planted fake key (self-test).
 
@@ -275,23 +283,6 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - [ ] `e2e/smoke.prod.spec.ts` (manual run only, never in CI): health, limits, PDF ingest.
 - [ ] `env.test.ts` additions: production rules (`blob`, `upstash`, no `fixture`).
 
-## M12 YouTube on the deployed app
-
-**Scope**
-- `supadata.ts`: `GET /v1/transcript` with the canonical URL, `mode=native`, `text=false` (timestamps), explicit 206 handling, defensive 202 job polling with a cap, error mapping from reference §3, 15 s timeout.
-- Global 1 req/s limiter and a monthly credit counter (`SUPADATA_MONTHLY_CAP`); `youtube_quota` when hit.
-- Measure whether the direct provider ever succeeds from Vercel; set `YOUTUBE_PROVIDERS` for production from that measurement.
-- README: "YouTube on Vercel" section explaining the cloud-IP block, the chain, the cache and the free-plan limits.
-
-**Acceptance criteria**
-- [ ] MC-7 passes on production: three captioned videos (long, non-English, auto-captions only).
-- [ ] A second paste of the same video makes no Supadata call.
-- [ ] Credits used during the review stay under the monthly cap by design.
-
-**Tests**
-- [ ] `supadata.test.ts`: recorded 200, 206, 202 then completed, 202 then failed, 400, 401, 402, 403, 404, 429, 500, 502, timeout.
-- [ ] `chain.test.ts` additions: direct blocked → Supadata ok; Supadata quota → `youtube_quota`.
-
 ## M13 Test hardening and CI e2e
 
 **Scope**
@@ -308,7 +299,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - [ ] CI is green on Chromium and WebKit, three repeats without a flake.
 - [ ] Every SPEC matrix row has a passing proof.
 - [ ] The review-script dry run passes on production with gpt-realtime-2.1.
-- [ ] Ledger total after QA is within the $4 QA envelope, leaving ≥ $10 for review.
+- [ ] OpenAI usage dashboard after QA shows about $4 or less spent, leaving ≥ $10 for review.
 
 **Tests**
 - [ ] CI e2e matrix (Chromium, WebKit).

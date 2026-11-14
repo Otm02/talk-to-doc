@@ -99,33 +99,56 @@ export function runStateContract(
       });
     });
 
-    describe("UsageLedger", () => {
-      it("accumulates spend and sessions into today and all-time totals", async () => {
+    describe("RateLimiter.countDaily", () => {
+      it("allows up to the cap, then blocks", async () => {
         const { adapters } = await make();
-        const before = await adapters.ledger.totals();
-        await adapters.ledger.addSpend(0.25);
-        await adapters.ledger.addSpend(0.5);
-        await adapters.ledger.addSession();
-        await adapters.ledger.addSession();
-        const after = await adapters.ledger.totals();
-        expect(after.todaySpendUsd - before.todaySpendUsd).toBeCloseTo(0.75, 6);
-        expect(after.totalSpendUsd - before.totalSpendUsd).toBeCloseTo(0.75, 6);
-        expect(after.todaySessions - before.todaySessions).toBe(2);
-        expect(after.totalSessions - before.totalSessions).toBe(2);
+        const key = crypto.randomUUID();
+        const first = await adapters.rateLimiter.countDaily(key, 2);
+        expect(first).toEqual({ allowed: true, count: 1, remaining: 1 });
+        const second = await adapters.rateLimiter.countDaily(key, 2);
+        expect(second).toEqual({ allowed: true, count: 2, remaining: 0 });
+        const third = await adapters.rateLimiter.countDaily(key, 2);
+        expect(third.allowed).toBe(false);
+        expect(third.remaining).toBe(0);
       });
 
-      it("starts a new day without losing all-time totals", async () => {
+      it("blocks everything when the cap is 0", async () => {
+        const { adapters } = await make();
+        const res = await adapters.rateLimiter.countDaily(
+          crypto.randomUUID(),
+          0,
+        );
+        expect(res.allowed).toBe(false);
+        expect(res.remaining).toBe(0);
+      });
+
+      it("keeps keys independent", async () => {
+        const { adapters } = await make();
+        const a = crypto.randomUUID();
+        await adapters.rateLimiter.countDaily(a, 1);
+        expect((await adapters.rateLimiter.countDaily(a, 1)).allowed).toBe(
+          false,
+        );
+        expect(
+          (await adapters.rateLimiter.countDaily(crypto.randomUUID(), 1))
+            .allowed,
+        ).toBe(true);
+      });
+
+      it("starts fresh on the next UTC day", async () => {
         const h = await make();
         if (!h.canJumpDays) return;
-        await h.adapters.ledger.addSpend(1);
-        await h.adapters.ledger.addSession();
+        const key = crypto.randomUUID();
+        await h.adapters.rateLimiter.countDaily(key, 1);
+        expect((await h.adapters.rateLimiter.countDaily(key, 1)).allowed).toBe(
+          false,
+        );
         await h.advance(24 * 60 * 60 * 1000);
-        await h.adapters.ledger.addSpend(0.5);
-        const t = await h.adapters.ledger.totals();
-        expect(t.todaySpendUsd).toBeCloseTo(0.5, 6);
-        expect(t.totalSpendUsd).toBeCloseTo(1.5, 6);
-        expect(t.todaySessions).toBe(0);
-        expect(t.totalSessions).toBe(1);
+        expect(await h.adapters.rateLimiter.countDaily(key, 1)).toEqual({
+          allowed: true,
+          count: 1,
+          remaining: 0,
+        });
       });
     });
   });

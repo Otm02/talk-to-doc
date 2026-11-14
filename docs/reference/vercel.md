@@ -147,7 +147,7 @@ Design impacts:
 - Document text can be several MB. Store it page by page (matches the NDJSON page lines) under one prefix with a TTL (e.g. 1 to 2 h), not as one 25 MB value. A 10 MB request cap and a 250 MB total make a single big key a bad idea.
 - Every read/write of a page is a command. For the 500K/month budget, prefer `MGET`/pipelines and a single metadata key.
 - Give every key a TTL so the 250 MB cap cannot fill up.
-- Usage ledger writes: one `INCRBYFLOAT`/`HINCRBY` per `response.done`, not one list entry.
+- The daily session counter is one `INCR` plus `EXPIRE` per mint (pipelined); there are no per-`response.done` writes.
 
 ## 4. Preview deployment protection
 

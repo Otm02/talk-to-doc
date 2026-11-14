@@ -6,7 +6,7 @@ The assessment brief is private. Everything below is a paraphrase.
 
 ## 1. Product in one paragraph
 
-A mobile-first web app, designed at 390x844. The user uploads a PDF of up to 25 MB, or pastes a YouTube link. The server extracts the text and the app shows all of it in a collapsible preview. The user then taps **Start Voice Chat** and talks about the document with an OpenAI Realtime model over WebRTC, seeing a live transcript as they go. With no microphone, the same conversation runs as text chat. The app is public on Vercel Hobby and runs on a shared $20 OpenAI key, so cost guards are a product feature, not an afterthought.
+A mobile-first web app, designed at 390x844. The user uploads a PDF of up to 25 MB, or pastes a YouTube link. The server extracts the text and the app shows all of it in a collapsible preview. The user then taps **Start Voice Chat** and talks about the document with an OpenAI Realtime model over WebRTC, seeing a live transcript as they go. With no microphone, the same conversation runs as text chat. The app is public on Vercel Hobby and runs on a shared OpenAI key with a hard $20 limit enforced by OpenAI, so cost guards are a product feature, not an afterthought.
 
 ## 2. Requirements traceability matrix
 
@@ -19,7 +19,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | FR-ING-01 | Accept a PDF upload up to 25 MB | Size is checked three times: client check, `maximumSizeInBytes` on the Blob token, then a server check of the real size and `%PDF-` magic bytes. The browser uploads straight to Vercel Blob (`UPLOAD_MODE=blob`), or as multipart locally and in CI (`UPLOAD_MODE=direct`) | `src/server/ingest/pdf/validate.test.ts`, `src/server/upload/token.test.ts`, `e2e/ingest-pdf.spec.ts` | M2, M4 |
 | FR-ING-02 | Accept a YouTube link and use the video's captions | Strict URL parser covering every shape in reference §4. A provider chain fetches captions: direct InnerTube fetcher, then Supadata | `src/server/youtube/parse-url.test.ts`, `src/server/youtube/direct.test.ts`, `e2e/ingest-youtube.spec.ts` | M3, M4 |
 | FR-ING-03 | PDF ingestion works on the deployed app | Blob client upload means no PDF ever passes through a Function body (4.5 MB cap). Ingest streams NDJSON | MC-1 (20 MB PDF on a preview, M2), MC-6 (production, M11) | M2, M11 |
-| FR-ING-04 | YouTube works at least locally; deployed is a bonus, and the README explains the limitation or how we beat it | Direct fetcher works locally. Supadata fallback (`mode=native`) on Vercel. README has a "YouTube on Vercel" section | MC-2 (local), MC-7 (deployed), README review | M3, M12 |
+| FR-ING-04 | YouTube works at least locally; deployed is a bonus, and the README explains the limitation or how we beat it | Direct fetcher works locally. Supadata fallback (`mode=native`) on Vercel. README has a "YouTube on Vercel" section | MC-2 (local), MC-7 (deployed), README review | M3 |
 | FR-ING-05 | Text is extracted on the server | `unpdf` per page in `src/server/ingest/pdf`. Captions fetched and parsed in `src/server/youtube` | `src/server/ingest/pdf/extract.test.ts`, `src/server/youtube/captions-xml.test.ts` | M2, M3 |
 | FR-ING-06 | Extracted text is shown in a collapsible preview | The document screen has a collapsible full-text panel with page or timestamp markers. Pages render as they stream in | `src/features/document/text-preview.test.tsx`, `e2e/ingest-pdf.spec.ts` | M4 |
 | FR-CTX-01 | Extracted text becomes context for the Realtime session | The server builds session instructions from DocumentStore (never from client-sent text), fences them as untrusted, and mints the client secret with them already in place | `src/server/context/build-instructions.test.ts`, `src/server/session/service.test.ts` | M5 |
@@ -43,8 +43,8 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | GR-04 | Ephemeral tokens issued by our backend | Same as FR-SEC-02 | same | M5 |
 | GR-05 | Handle mic input and model audio output | `getUserMedia` with echo cancellation, noise suppression and AGC; remote track into an `<audio>` element unlocked in the tap gesture | `webrtc-transport.test.ts`, MC-3 | M6, M8 |
 | GR-06 | PDF extraction runs on the server | unpdf in a Node route handler | `extract.test.ts` | M2 |
-| GR-07 | Transcripts fetched on the server, not via the YouTube Data API | Direct InnerTube fetcher plus Supadata, both server-side | `direct.test.ts`, `supadata.test.ts` | M3, M12 |
-| GR-08 | In-memory or lightweight storage; no user accounts | DocumentStore, RateLimiter and UsageLedger adapters: memory locally, Upstash Redis free plan on Vercel. No auth | `src/server/adapters/*.contract.test.ts` | M1, M10 |
+| GR-07 | Transcripts fetched on the server, not via the YouTube Data API | Direct InnerTube fetcher plus Supadata, both server-side | `direct.test.ts`, `supadata.test.ts` | M3 |
+| GR-08 | In-memory or lightweight storage; no user accounts | DocumentStore and RateLimiter adapters: memory locally, Upstash Redis free plan on Vercel. No auth | `src/server/adapters/*.contract.test.ts` | M1, M10 |
 
 ### 2.2 Deliverables
 
@@ -64,7 +64,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 
 | ID | What the reviewer will do (paraphrased) | How we make it pass | Proof | Milestone |
 |---|---|---|---|---|
-| RS-1 | Paste a captioned YouTube link and check the transcript loads | Provider chain with Supadata on Vercel; cache by `videoId+lang` so repeats are free; clear copy for every failure | `e2e/ingest-youtube.spec.ts`, MC-7 | M3, M12 |
+| RS-1 | Paste a captioned YouTube link and check the transcript loads | Provider chain with Supadata on Vercel; cache by `videoId+lang` so repeats are free; clear copy for every failure | `e2e/ingest-youtube.spec.ts`, MC-7 | M3 |
 | RS-2 | Upload a PDF and check the whole text was extracted | Blob upload, every page streamed into the preview, page count and character stats shown, coverage notice explains what the model sees | `e2e/ingest-pdf.spec.ts`, MC-6 | M2, M4, M11 |
 | RS-3 | On a phone: start a voice chat, interrupt the assistant, ask a natural follow-up | Server VAD barge-in plus a Stop button; conversation history kept in the session; iOS audio unlock; echo cancellation | `reducer.test.ts` (interrupt paths), MC-3, MC-4 | M6, M7, M8 |
 | RS-4 | Use it on a bad network and judge stability | Reconnect state machine with transcript carry-over, offline banner, upload retry, idempotent ingest | `e2e/network.spec.ts`, `reconnect.test.ts`, MC-5 | M9 |
@@ -75,7 +75,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | ID | Rubric area | Top-score behavior we commit to | Proof | Milestone |
 |---|---|---|---|---|
 | RUB-1 | Product polish (mobile) | Every async action has four visible states. Exact copy for every error (section 4). Safe areas, dvh units, keyboard-aware composer, reduced motion, 44 px targets, aria-live transcript | `e2e/states.spec.ts`, `e2e/layout.spec.ts`, MC-4 | M4, M7, M8 |
-| RUB-2 | Ingestion quality | Every PDF and YouTube edge case in section 5 has a defined behavior and a test. Ligatures and hyphenation fixed, non-Latin text kept, scanned PDFs detected | `src/server/ingest/pdf/*.test.ts`, `src/server/youtube/*.test.ts` | M2, M3, M12 |
+| RUB-2 | Ingestion quality | Every PDF and YouTube edge case in section 5 has a defined behavior and a test. Ligatures and hyphenation fixed, non-Latin text kept, scanned PDFs detected | `src/server/ingest/pdf/*.test.ts`, `src/server/youtube/*.test.ts` | M2, M3 |
 | RUB-3 | Code quality | TS strict, no `any`, zod at every boundary, discriminated unions with exhaustive switches, small modules, tests next to code, comments that explain why | `pnpm check`, reviewer report | all |
 | RUB-4 | System design | Thin routes over services; three state adapters chosen by env; every external call behind an adapter with a timeout and typed errors; a pure realtime reducer behind a transport interface | ARCHITECTURE.md, contract tests | M1, M5, M6, M10 |
 
@@ -220,9 +220,7 @@ Text mode and voice share these guards. Ingestion and the preview never depend o
 | `budget_voice_disabled` | 503 | `VOICE_ENABLED=false` (kill switch) | Voice chat is turned off right now. You can still read the document. |
 | `budget_ip_rate` | 429 | Per-IP mint limit hit | You've started a lot of chats. Wait {minutes} min and try again. |
 | `budget_daily_sessions` | 429 | `DAILY_SESSION_CAP` reached (UTC day) | Today's voice chats are used up. You can still read the document. Try again tomorrow. |
-| `budget_daily_spend` | 429 | Ledger today + open reservations ≥ `DAILY_SPEND_LIMIT_USD` | Voice chat is paused for today to stay within budget. You can still read the document. Try again tomorrow. |
-| `budget_total_spend` | 429 | Ledger total + open reservations ≥ `SPEND_LIMIT_USD` | Voice chat is off because this demo's budget is used up. You can still read the document. |
-| `budget_openai_spend` | 503 | OpenAI returns `credit_balance_exhausted`, `project_spend_limit_exceeded`, `organization_spend_limit_exceeded` or `organization_usage_limit_exceeded` (never retried). The server also latches `VOICE_ENABLED=false` in Redis for 1 h | Voice chat is unavailable because the API budget is used up. You can still read the document. |
+| `budget_exhausted` | 503 | OpenAI returns `credit_balance_exhausted`, `project_spend_limit_exceeded`, `organization_spend_limit_exceeded`, `organization_usage_limit_exceeded` or `insufficient_quota` (never retried; nothing is latched, the next mint simply tries again) | Voice chat is unavailable because the API budget is used up. You can still read the document. |
 
 ## 5. Edge cases
 
@@ -301,7 +299,7 @@ From [reference/openai-realtime.md §4](reference/openai-realtime.md) (USD per 1
 | gpt-realtime-2.1-mini | 0.60 / 0.06 / 2.40 | 10.00 / 0.30 / 20.00 |
 | gpt-realtime-2.1 | 4.00 / 0.40 / 24.00 | 32.00 / 0.40 / 64.00 |
 
-`cost = Σ_mod[(in − cached) × in_price + cached × cached_price] + Σ_mod out × out_price`, divided by 1e6. Input transcription (`gpt-4o-mini-transcribe`, $0.003/min) is read from `…input_audio_transcription.completed` usage and priced separately. Prices live in `src/server/pricing/prices.ts` with the date they were fetched.
+`cost = Σ_mod[(in − cached) × in_price + cached × cached_price] + Σ_mod out × out_price`, divided by 1e6. Input transcription (`gpt-4o-mini-transcribe`, $0.003/min) is read from `…input_audio_transcription.completed` usage and priced separately. Prices live in `src/features/voice/dev-cost/prices.ts` (dev-only overlay) with the date they were fetched.
 
 ### 7.2 Worked estimate
 
@@ -320,18 +318,13 @@ Assumptions for one 5-minute active chat: 10 turns, the user speaks 8 s (80 audi
 
 A full 10-minute chat costs roughly double that, because history re-sends grow with each turn: about $0.95 on 2.1. The first live checkpoint in M6 replaces these assumptions with measured numbers, and this table is updated.
 
-### 7.3 Envelopes
+### 7.3 Where the money is capped
 
-| Envelope | Budget | Settings | What it buys |
-|---|---|---|---|
-| Build (M1–M12) | $4 | mini, 8k, every live call asked for first | Planned checkpoints cost ≈ $0.50 in total; the rest covers debugging |
-| Final QA and video (M13) | $4 | production switched to 2.1, 20k | ≈ 8 full-length chats |
-| Review | $10 or more | 2.1, 20k | ≈ 20 five-minute chats |
-| Reserve | $2 | never planned against | Absorbs estimate drift before OpenAI's hard cap |
-
-`SPEND_LIMIT_USD` (production, cumulative, Upstash) = **14**, covering QA and review. Build spend happens locally against an in-memory ledger, so it is tracked from the OpenAI usage dashboard and logged in AI_LOG.md after each live checkpoint.
+OpenAI enforces the hard $20 limit on the key, for the build, QA, the video and the review together. The app keeps no dollar ledger of its own: a second ledger could only drift from OpenAI's billing, and the server cannot see `response.done` anyway (the browser talks to OpenAI directly). Planned live checkpoints (PLAN.md) cost about $0.50 in total on mini; final QA and the video run on `gpt-realtime-2.1` with `CONTEXT_TOKEN_BUDGET=20000` and should stay within about $4, which leaves the rest for review. Spend is watched on the OpenAI usage dashboard and logged in AI_LOG.md after each live checkpoint.
 
 ### 7.4 Guards
+
+`POST /api/session` enforces, in order: `VOICE_ENABLED`, the per-IP limit, `DAILY_SESSION_CAP`. If OpenAI answers with a quota or billing-limit error, the route maps it to 503 `budget_exhausted` and never retries.
 
 | Guard | Default (dev / prod) | What it does | What the user sees |
 |---|---|---|---|
@@ -339,20 +332,17 @@ A full 10-minute chat costs roughly double that, because history re-sends grow w
 | `CONTEXT_TOKEN_BUDGET` | 8000 / 20000 | caps instruction size | coverage notice |
 | `VOICE_ENABLED` | true / true | kill switch, checked on every mint and by `/api/limits` | `budget_voice_disabled` |
 | Per-IP mint limit | 10 per 10 min / 6 per 10 min and 20 per day | sliding window; **fails closed** on limiter timeout | `budget_ip_rate` |
-| `DAILY_SESSION_CAP` | 50 / 25 | counts mints per UTC day (reconnects of the same session within 10 min do not count) | `budget_daily_sessions` |
-| `DAILY_SPEND_LIMIT_USD` | 1 / 4 | ledger today + open reservations | `budget_daily_spend` |
-| `SPEND_LIMIT_USD` | 4 / 14 | ledger total + open reservations | `budget_total_spend` |
-| Session reservation | computed | each mint reserves the worst-case cost of a full `MAX_SESSION_SECONDS` chat (≈ $1.00 on 2.1, ≈ $0.25 on mini); reconciled to reported usage on `POST /api/usage {final: true}`; never reconciled = charged in full | — (makes spend guards conservative) |
-| `MAX_SESSION_SECONDS` | 600 | client ends the chat; warning at 540 s | warning toast, then `session_max_duration` |
+| `DAILY_SESSION_CAP` | 50 / 25 | daily fixed-window counter in RateLimiter, keyed by UTC date (memory locally, Upstash on Vercel); reconnects of the same session within 10 min do not count | `budget_daily_sessions` |
+| `MAX_SESSION_MINUTES` | 5 | client ends the chat; warning 1 min before | warning toast, then `session_max_duration` |
 | Idle hang-up | 120 s with no speech and no response | client ends the chat | `session_idle` |
 | Hidden tab | 60 s `visibilityState = hidden` | client ends the chat | `session_hidden` |
 | `max_output_tokens` | 1024 per response | bounds one runaway answer | — |
 | Client secret TTL | 60 s | short window to start a session | — |
-| OpenAI billing errors | — | never retried; latch voice off for 1 h | `budget_openai_spend` |
+| OpenAI quota or billing error | — | never retried | `budget_exhausted` |
 | Supadata credit guard | — / 80 per month, 1 req/s global | protects the 100-credit free plan | `youtube_quota` |
 | Upload limits | 20 per hour per IP, 150 per day global | protects Blob's 2,000 advanced ops per month and the 30-day lock-out | `rate_limited` |
 
-Trust model: usage arrives from the browser, so it is **advisory**. The authoritative guards are the mint count limits, the reservation and OpenAI's own project cap. A lying client can make reconciliation release its reservation, but cannot raise the number of sessions it may open.
+Dev-only cost overlay: in development builds the client estimates tokens and cost from each `response.done` usage block (price table from 7.1, `src/features/voice/dev-cost`). It is for the developer's eyes, stripped from production builds, and nothing is reported to the server.
 
 ## 8. Security model
 
@@ -369,9 +359,8 @@ Trust model: usage arrives from the browser, so it is **advisory**. The authorit
 | ID | Threat | Mitigation | Test |
 |---|---|---|---|
 | T-01 | OpenAI key leaks to the client or logs | single `env.ts`; `server-only`; lint rule; bundle grep; logger redacts `Authorization` and `*_KEY`/`*_TOKEN` fields | `env.test.ts`, `logger.test.ts`, CI bundle check |
-| T-02 | Stolen client secret used for a free session or with changed instructions | 60 s TTL; one mint per request; per-IP and daily caps; reservation; OpenAI hard cap | `session/service.test.ts` |
-| T-03 | Denial of wallet: a script mints sessions in a loop | per-IP and global limits, fail-closed limiter, `DAILY_SESSION_CAP`, `SPEND_LIMIT_USD`, kill switch | `guard.test.ts` |
-| T-04 | Client under-reports usage | reported usage advisory; reservation charged in full unless reconciled; caps on count | `usage-ledger.test.ts` |
+| T-02 | Stolen client secret used for a free session or with changed instructions | 60 s TTL; one mint per request; per-IP and daily caps; OpenAI hard limit on the key | `session/service.test.ts` |
+| T-03 | Denial of wallet: a script mints sessions in a loop | per-IP limit, fail-closed limiter, `DAILY_SESSION_CAP`, kill switch, `MAX_SESSION_MINUTES`; OpenAI's hard limit caps the worst case | `guard.test.ts` |
 | T-05 | Prompt injection inside the document or transcript | server-built instructions, untrusted fences, escaping of fence tags, rules before and after the reference | `build-instructions.test.ts` (injection fixtures) |
 | T-06 | SSRF or parameter injection via the YouTube URL | strict host allowlist, 11-char id regex, canonical URL rebuilt, raw input never fetched | `parse-url.test.ts` |
 | T-07 | Blob pathname tampering (read or delete someone else's upload) | token route issues `uploads/{nonce}.pdf` with `addRandomSuffix`; `tokenPayload` holds a nonce bound to the client IP hash; ingest requires the pathname prefix and nonce to match; private store | `upload/token.test.ts`, `ingest-pdf route.test.ts` |

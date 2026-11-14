@@ -26,17 +26,6 @@ const intInRange = (min: number, max: number, fallback: number) =>
       .transform((v) => v ?? fallback),
   );
 
-const numberInRange = (min: number, max: number, fallback: number) =>
-  optional.pipe(
-    z
-      .string()
-      .regex(/^\d+(\.\d+)?$/, "must be a number")
-      .transform(Number)
-      .pipe(z.number().min(min).max(max))
-      .optional()
-      .transform((v) => v ?? fallback),
-  );
-
 const MODELS = ["gpt-realtime-2.1-mini", "gpt-realtime-2.1"] as const;
 
 const schema = z.object({
@@ -66,8 +55,6 @@ const schema = z.object({
   UPLOAD_MODE: optional.pipe(z.enum(["direct", "blob"]).optional()),
   VOICE_ENABLED: optional.pipe(bool.optional().transform((v) => v ?? true)),
   DAILY_SESSION_CAP: intInRange(0, 10000, 40),
-  DAILY_SPEND_LIMIT_USD: numberInRange(0, 1000, 3),
-  ADMIN_TOKEN: optional,
   BLOB_READ_WRITE_TOKEN: optional,
   UPSTASH_REDIS_REST_URL: optional,
   UPSTASH_REDIS_REST_TOKEN: optional,
@@ -93,8 +80,6 @@ export interface Env {
   uploadMode: UploadMode;
   voiceEnabled: boolean;
   dailySessionCap: number;
-  dailySpendLimitUsd: number;
-  adminToken: string | undefined;
   blobToken: string | undefined;
   upstash: { url: string; token: string } | undefined;
   stateDriver: StateDriver;
@@ -164,8 +149,6 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     uploadMode,
     voiceEnabled: v.VOICE_ENABLED,
     dailySessionCap: v.DAILY_SESSION_CAP,
-    dailySpendLimitUsd: v.DAILY_SPEND_LIMIT_USD,
-    adminToken: v.ADMIN_TOKEN,
     blobToken: v.BLOB_READ_WRITE_TOKEN,
     upstash,
     stateDriver: upstash ? "upstash" : "memory",

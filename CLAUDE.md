@@ -9,11 +9,12 @@ Sources of truth: docs/SPEC.md (requirements and acceptance tests), docs/PLAN.md
 Next.js 16 App Router with Node runtime route handlers, React, TypeScript strict, Tailwind v4, shadcn/ui, lucide-react, zod, unpdf, gpt-tokenizer, Vitest with Testing Library, Playwright, pnpm. Hosting: Vercel Hobby (free), with Vercel Blob for PDF uploads and Upstash Redis (free plan) for shared state. Nothing may require a paid plan or a credit card.
 
 ## Budget rules
-The OpenAI key belongs to Genius and is capped at $20 for everything, including their review.
+The OpenAI key belongs to Genius and has a hard $20 limit enforced by OpenAI billing, for everything including their review. The app keeps no dollar accounting of its own.
 - REALTIME_MODEL defaults to gpt-realtime-2.1-mini. Only production switches to gpt-realtime-2.1, at the end.
 - Unit tests, e2e tests and CI never call the live OpenAI API. Use MockTransport and recorded fixtures.
 - Ask me before any step that calls the live API, and keep live sessions short.
-- Every response.done usage block is priced and recorded in the UsageLedger.
+- Cost guards that stay: REALTIME_MODEL, CONTEXT_TOKEN_BUDGET (8000 by default, 20000 in final production), VOICE_ENABLED (kill switch), MAX_SESSION_MINUTES, per-IP rate limiting and DAILY_SESSION_CAP. POST /api/session enforces them, and maps OpenAI's quota or billing-limit error to 503 `budget_exhausted`.
+- The client shows a dev-only overlay that estimates tokens and cost from response.done events. Nothing is reported to the server.
 
 ## Commands
 - pnpm dev, pnpm build, pnpm start
@@ -24,7 +25,7 @@ The OpenAI key belongs to Genius and is capped at $20 for everything, including 
 - src/server/** is server-only (import "server-only"). Client code never imports it.
 - Secrets are read only in src/server/env.ts, validated with zod. Never prefix a secret with NEXT_PUBLIC_. The browser only ever receives a short-lived Realtime client secret.
 - Route handlers stay thin: validate input with zod, call one service in src/server, map AppError to { error: { code, message } }.
-- Shared state goes through three adapters: DocumentStore, RateLimiter, UsageLedger. In-memory locally and in tests, Upstash on Vercel, chosen by env. Never rely on module-level memory in production.
+- Shared state goes through two adapters: DocumentStore and RateLimiter (sliding-window limits plus the daily session counter). In-memory locally and in tests, Upstash on Vercel, chosen by env. Never rely on module-level memory in production.
 - PDFs never pass through a Vercel Function body (4.5 MB cap). UPLOAD_MODE=blob uploads from the browser to Vercel Blob; UPLOAD_MODE=direct (local and CI) posts multipart to the route.
 - Ingest routes stream NDJSON (a metadata line, then page lines), so large documents never hit the 4.5 MB response cap.
 - Every external call (OpenAI, YouTube, Supadata, Blob, Upstash) goes through an adapter with a timeout and typed errors. Never leak upstream messages or stack traces to the client.
