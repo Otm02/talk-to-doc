@@ -28,28 +28,26 @@ export interface RateResult {
   retryAfterMs: number;
 }
 
+export interface DailyCountResult {
+  allowed: boolean;
+  /** Hits so far today (UTC), including this one when allowed. */
+  count: number;
+  remaining: number;
+}
+
 export interface RateLimiter {
   /** Sliding window per key. Counts this call whether or not it is allowed only when allowed. */
   limit(key: string, rule: RateRule): Promise<RateResult>;
-}
-
-export interface UsageTotals {
-  todaySpendUsd: number;
-  totalSpendUsd: number;
-  todaySessions: number;
-  totalSessions: number;
-}
-
-export interface UsageLedger {
-  addSpend(usd: number): Promise<void>;
-  addSession(): Promise<void>;
-  totals(): Promise<UsageTotals>;
+  /**
+   * Fixed window keyed by the UTC date: counts one hit and allows it while the
+   * day's count stays within `cap`. Used for DAILY_SESSION_CAP.
+   */
+  countDaily(key: string, cap: number): Promise<DailyCountResult>;
 }
 
 export interface StateAdapters {
   documents: DocumentStore;
   rateLimiter: RateLimiter;
-  ledger: UsageLedger;
 }
 
 /** UTC day key, e.g. 2026-11-09. */

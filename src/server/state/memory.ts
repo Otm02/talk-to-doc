@@ -5,12 +5,11 @@ import {
   type Clock,
   type DocumentStore,
   type JsonValue,
+  type DailyCountResult,
   type RateLimiter,
   type RateResult,
   type RateRule,
   type StateAdapters,
-  type UsageLedger,
-  type UsageTotals,
 } from "./types";
 
 // Local dev and tests only. env.ts refuses this driver on Vercel.
@@ -45,7 +44,18 @@ export function createMemoryRateLimiter(
   clock: Clock = systemClock,
 ): RateLimiter {
   const hits = new Map<string, number[]>();
+  const daily = new Map<string, number>();
   return {
+    async countDaily(key, cap): Promise<DailyCountResult> {
+      const day = dayKey(clock.now());
+      // Only today matters, so older days are dropped instead of piling up.
+      for (const k of daily.keys()) if (!k.endsWith(`:${day}`)) daily.delete(k);
+      const id = `${key}:${day}`;
+      const count = daily.get(id) ?? 0;
+      if (count >= cap) return { allowed: false, count, remaining: 0 };
+      daily.set(id, count + 1);
+      return { allowed: true, count: count + 1, remaining: cap - count - 1 };
+    },
     async limit(key, rule: RateRule): Promise<RateResult> {
       const now = clock.now();
       const recent = (hits.get(key) ?? []).filter(
@@ -71,42 +81,11 @@ export function createMemoryRateLimiter(
   };
 }
 
-export function createMemoryUsageLedger(
-  clock: Clock = systemClock,
-): UsageLedger {
-  const spendByDay = new Map<string, number>();
-  const sessionsByDay = new Map<string, number>();
-  let totalSpend = 0;
-  let totalSessions = 0;
-  return {
-    async addSpend(usd) {
-      const day = dayKey(clock.now());
-      spendByDay.set(day, (spendByDay.get(day) ?? 0) + usd);
-      totalSpend += usd;
-    },
-    async addSession() {
-      const day = dayKey(clock.now());
-      sessionsByDay.set(day, (sessionsByDay.get(day) ?? 0) + 1);
-      totalSessions += 1;
-    },
-    async totals(): Promise<UsageTotals> {
-      const day = dayKey(clock.now());
-      return {
-        todaySpendUsd: spendByDay.get(day) ?? 0,
-        totalSpendUsd: totalSpend,
-        todaySessions: sessionsByDay.get(day) ?? 0,
-        totalSessions,
-      };
-    },
-  };
-}
-
 export function createMemoryAdapters(
   clock: Clock = systemClock,
 ): StateAdapters {
   return {
     documents: createMemoryDocumentStore(clock),
     rateLimiter: createMemoryRateLimiter(clock),
-    ledger: createMemoryUsageLedger(clock),
   };
 }

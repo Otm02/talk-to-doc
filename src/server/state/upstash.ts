@@ -7,9 +7,9 @@ import {
   type Clock,
   type DocumentStore,
   type JsonValue,
+  type DailyCountResult,
   type RateLimiter,
   type StateAdapters,
-  type UsageLedger,
 } from "./types";
 
 const PREFIX = "ttd";
@@ -37,10 +37,30 @@ export function createUpstashDocumentStore(redis: Redis): DocumentStore {
   };
 }
 
-export function createUpstashRateLimiter(redis: Redis): RateLimiter {
+const DAILY_KEY_TTL_SECONDS = 48 * 60 * 60;
+
+export function createUpstashRateLimiter(
+  redis: Redis,
+  clock: Clock = systemClock,
+): RateLimiter {
   // @upstash/ratelimit fixes the rule at construction, so keep one per rule.
   const limiters = new Map<string, Ratelimit>();
   return {
+    async countDaily(key, cap): Promise<DailyCountResult> {
+      const k = `${PREFIX}:daily:${key}:${dayKey(clock.now())}`;
+      // INCR is atomic, so concurrent starts cannot both take the last slot.
+      // The TTL outlives the day so a late hit never recreates an immortal key.
+      const [count] = await redis
+        .pipeline()
+        .incr(k)
+        .expire(k, DAILY_KEY_TTL_SECONDS)
+        .exec<[number, number]>();
+      return {
+        allowed: count <= cap,
+        count,
+        remaining: Math.max(0, cap - count),
+      };
+    },
     async limit(key, rule) {
       const id = `${rule.max}:${rule.windowMs}`;
       let rl = limiters.get(id);
@@ -64,54 +84,12 @@ export function createUpstashRateLimiter(redis: Redis): RateLimiter {
   };
 }
 
-export function createUpstashUsageLedger(
-  redis: Redis,
-  clock: Clock = systemClock,
-): UsageLedger {
-  const k = {
-    spendDay: (d: string) => `${PREFIX}:usd:day:${d}`,
-    spendTotal: `${PREFIX}:usd:total`,
-    sessionsDay: (d: string) => `${PREFIX}:sessions:day:${d}`,
-    sessionsTotal: `${PREFIX}:sessions:total`,
-  };
-  const num = (v: string | null) => (v === null ? 0 : Number(v));
-  return {
-    async addSpend(usd) {
-      const day = dayKey(clock.now());
-      await Promise.all([
-        redis.incrbyfloat(k.spendDay(day), usd),
-        redis.incrbyfloat(k.spendTotal, usd),
-      ]);
-    },
-    async addSession() {
-      const day = dayKey(clock.now());
-      await Promise.all([
-        redis.incr(k.sessionsDay(day)),
-        redis.incr(k.sessionsTotal),
-      ]);
-    },
-    async totals() {
-      const day = dayKey(clock.now());
-      const [spendDay, spendTotal, sessDay, sessTotal] = await redis.mget<
-        (string | null)[]
-      >(k.spendDay(day), k.spendTotal, k.sessionsDay(day), k.sessionsTotal);
-      return {
-        todaySpendUsd: num(spendDay ?? null),
-        totalSpendUsd: num(spendTotal ?? null),
-        todaySessions: num(sessDay ?? null),
-        totalSessions: num(sessTotal ?? null),
-      };
-    },
-  };
-}
-
 export function createUpstashAdapters(
   redis: Redis,
   clock: Clock = systemClock,
 ): StateAdapters {
   return {
     documents: createUpstashDocumentStore(redis),
-    rateLimiter: createUpstashRateLimiter(redis),
-    ledger: createUpstashUsageLedger(redis, clock),
+    rateLimiter: createUpstashRateLimiter(redis, clock),
   };
 }

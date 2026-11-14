@@ -162,7 +162,7 @@ Every event has `event_id` and `type`. Source for all: https://developers.openai
 - `conversation.item.input_audio_transcription.delta`: `item_id`, `content_index`, `delta`.
 - `conversation.item.input_audio_transcription.completed`: `item_id`, `content_index`, `transcript`, `usage` (`{type:"tokens", total_tokens, input_tokens, input_token_details:{text_tokens,audio_tokens}, output_tokens}` or `{type:"duration", seconds}`), optional `logprobs`, `languages` (gpt-transcribe only).
 - `conversation.item.input_audio_transcription.failed`: `item_id`, `content_index`, `error:{type,code,message,param}`. Example code: `audio_unintelligible`.
-- Record transcription `usage` in the UsageLedger too; it is billed separately from the response.
+- Include transcription `usage` in the dev-only cost overlay too; it is billed separately from the response.
 
 **Response lifecycle**
 - `response.created`: `response` (id, `status: "in_progress"`). **Fields not re-read.**

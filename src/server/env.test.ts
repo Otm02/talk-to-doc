@@ -16,16 +16,15 @@ describe("parseEnv", () => {
     expect(env.docTtlMinutes).toBe(120);
     expect(env.voiceEnabled).toBe(true);
     expect(env.dailySessionCap).toBe(40);
-    expect(env.dailySpendLimitUsd).toBe(3);
     expect(env.uploadMode).toBe("direct");
     expect(env.stateDriver).toBe("memory");
     expect(env.openaiApiKey).toBeUndefined();
   });
 
   it("treats empty strings as unset", () => {
-    expect(
-      parseEnv({ REALTIME_MODEL: "", ADMIN_TOKEN: "  " }).adminToken,
-    ).toBeUndefined();
+    const env = parseEnv({ REALTIME_MODEL: "", SUPADATA_API_KEY: "  " });
+    expect(env.supadataApiKey).toBeUndefined();
+    expect(env.realtimeModel).toBe("gpt-realtime-2.1-mini");
   });
 
   it("rejects an unknown model", () => {
@@ -41,13 +40,10 @@ describe("parseEnv", () => {
     );
   });
 
-  it("parses VOICE_ENABLED=false and a decimal spend limit", () => {
-    const env = parseEnv({
-      VOICE_ENABLED: "false",
-      DAILY_SPEND_LIMIT_USD: "1.5",
-    });
+  it("parses VOICE_ENABLED=false and DAILY_SESSION_CAP=0", () => {
+    const env = parseEnv({ VOICE_ENABLED: "false", DAILY_SESSION_CAP: "0" });
     expect(env.voiceEnabled).toBe(false);
-    expect(env.dailySpendLimitUsd).toBe(1.5);
+    expect(env.dailySessionCap).toBe(0);
   });
 
   it("picks upstash when its variables exist, under either name", () => {
@@ -83,7 +79,7 @@ describe("parseEnv", () => {
   it("never puts secret values in error text", () => {
     const secrets = {
       OPENAI_API_KEY: "sk-live-abc123",
-      ADMIN_TOKEN: "admin-secret-xyz",
+      SUPADATA_API_KEY: "supadata-secret-xyz",
       UPSTASH_REDIS_REST_TOKEN: "super-secret-token",
       REALTIME_MODEL: "bad-model-sk-leak",
       VERCEL_ENV: "preview",
