@@ -57,7 +57,6 @@ src/
         use-voice-session.ts        the one hook: state, actions, level feed, estimated cost
       ui/                           status pill, transcript, controls, composer, mic meter (M7)
       dev-cost/                     dev-only overlay (cost-overlay.tsx): shown in development or with ?debug=1; never reported
-  app/dev/voice/                    temporary M6 harness page; removed in M7
   server/                           server-only (import "server-only"); never imported by client code
     env.ts                          the only reader of process.env; zod schema
     errors/                         AppError (code from the catalog, cause kept for logs)

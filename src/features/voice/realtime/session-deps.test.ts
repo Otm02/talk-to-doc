@@ -44,6 +44,20 @@ describe("createBrowserDeps", () => {
     ).toBe(300);
   });
 
+  it("can refuse the mint with a code and a wait, in mock mode", async () => {
+    at("?mockRealtime=normal-turn&mockMintError=daily_limit&mockRetryAfter=30");
+    await expect(
+      createBrowserDeps().mint("doc", new AbortController().signal),
+    ).rejects.toMatchObject({ code: "daily_limit", retryAfterSeconds: 30 });
+    at("?mockRealtime=normal-turn&mockMintError=nonsense");
+    await expect(
+      createBrowserDeps().mint("doc", new AbortController().signal),
+    ).rejects.toMatchObject({
+      code: "session_connect_failed",
+      retryAfterSeconds: undefined,
+    });
+  });
+
   it("asks the real endpoint otherwise", async () => {
     const f = vi.fn(
       async () =>

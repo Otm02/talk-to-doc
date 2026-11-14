@@ -1,11 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRef, useState } from "react";
 import { DocumentCard } from "@/features/document/document-card";
-import { ReadyBar } from "@/features/document/ready-bar";
 import { TextPreview } from "@/features/document/text-preview";
-import { publicEnv } from "@/lib/public-env";
+import { VoiceChat } from "@/features/voice/ui/voice-chat";
 import { ErrorCard } from "./error-card";
 import type { RecoveryAction } from "./error-copy";
 import { PdfPicker } from "./pdf-picker";
@@ -57,28 +55,20 @@ export function IngestScreen() {
     state.status === "ready" || state.status === "extracting" ? state.doc : null;
 
   if (doc) {
-    return (
+    const view = (
       <div className="flex flex-1 flex-col gap-4">
         <DocumentCard doc={doc} />
         {state.status === "extracting" && (
           <UploadStatus state={state} source={source} onCancel={ingest.cancel} />
         )}
         <TextPreview doc={doc} />
-        {state.status === "ready" && publicEnv.isDev && (
-          // Temporary (M6): opens the engine harness with this document.
-          // Removed when M7 wires the real Start Voice Chat button.
-          <Link
-            data-testid="dev-voice-link"
-            href={`/dev/voice?doc=${encodeURIComponent(doc.meta.documentId)}`}
-            className="flex min-h-11 items-center justify-center text-sm text-muted-foreground underline"
-          >
-            Test voice (dev)
-          </Link>
-        )}
-        {state.status === "ready" && (
-          <ReadyBar onUseAnother={() => startOver()} voiceDisabled />
-        )}
       </div>
+    );
+    if (state.status !== "ready") return view;
+    return (
+      <VoiceChat doc={doc} onUseAnother={() => startOver()}>
+        {view}
+      </VoiceChat>
     );
   }
 
