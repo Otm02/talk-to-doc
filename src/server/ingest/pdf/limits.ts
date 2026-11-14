@@ -1,7 +1,8 @@
 import "server-only";
+import { MAX_PDF_BYTES } from "@/lib/limits";
 import type { RateRule } from "../../state";
 
-export const MAX_PDF_BYTES = 25 * 1024 * 1024;
+export { MAX_PDF_BYTES };
 export const MAX_PDF_PAGES = 2000;
 
 // A multipart body is the file plus boundaries and headers; this slack keeps
