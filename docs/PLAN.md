@@ -85,6 +85,13 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 ## M3 YouTube pipeline (direct + Supadata, works deployed)
 
+**Built (differences from the scope below)**
+- Files live in `src/server/ingest/youtube/` (the pure parser and timestamp helper in `src/lib/youtube/`, so the UI can share them). `TranscriptProvider.fetch` returns a transcript or throws a typed `TranscriptError`; there is no result union.
+- Added `UPSTREAM_FAILED` (maps to `youtube_failed`); the chain falls through on it, `BLOCKED` and `UPSTREAM_TIMEOUT`.
+- Dropped: `fixture.ts` (M4 adds it with the UI e2e), the 5-minute units, `SUPADATA_MONTHLY_CAP` and the 1 req/s limiter (CLAUDE.md: the app keeps no accounting; the per-IP limit and the cache protect the credits), `YOUTUBE_PROVIDERS` (the Supadata key is the switch).
+- Transcript cache is 1 h (the M3 prompt), not 24 h. Supadata has no title or duration, so the title and channel come from oEmbed (best effort) and the duration from the last caption.
+- Direct fast-fails after 3 s on Vercel when Supadata is configured.
+
 **Scope**
 - `parse-url.ts` from reference §4, plus playlist, channel and `@handle` detection for `youtube_no_video_id`.
 - `TranscriptProvider` interface with a typed result union: `ok | terminal error | retryable error`. `chain.ts` falls through only on retryable errors (`youtube_blocked`, `youtube_failed`).
@@ -98,23 +105,23 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - Recorded fixtures (HTML, player JSON, caption XML) for each case, captured once locally, with tracking params removed.
 
 **Acceptance criteria**
-- [ ] Locally, a captioned public video loads with timestamps (MC-2).
+- [x] Locally, a captioned public video loads with timestamps (MC-2).
 - [ ] On a preview, a direct-only chain yields a clean `youtube_blocked` error line (expected on cloud IPs), never a crash or upstream text; with Supadata in the chain the same video loads.
 - [ ] MC-7 passes on production: three captioned videos (long, non-English, auto-captions only).
-- [ ] A second paste of the same video makes no Supadata call.
+- [x] A second paste of the same video makes no Supadata call.
 - [ ] Credits used during the review stay under the monthly cap by design.
-- [ ] Every YouTube edge case in SPEC §5.2 except Supadata-specific rows maps to its behavior.
-- [ ] Pasting the same video twice makes one upstream fetch.
+- [x] Every YouTube edge case in SPEC §5.2 except Supadata-specific rows maps to its behavior.
+- [x] Pasting the same video twice makes one upstream fetch.
 
 **Tests**
-- [ ] `parse-url.test.ts`: ≥ 20 positive shapes, every negative in reference §4, playlist, channel, handle.
-- [ ] `direct.test.ts`: OK, consent wall once and twice, 429, recaptcha, bot check, age restricted, unavailable, other unplayable, live, upcoming, no captions, PO token, unparsable HTML.
-- [ ] `pick-track.test.ts`: language preference order, manual before generated, same-code collision.
-- [ ] `captions-xml.test.ts`: entities, tags stripped, missing `dur`, empty lines skipped, DTD rejected, billion-laughs input rejected.
-- [ ] `chain.test.ts`: terminal stops, retryable falls through, all fail → last retryable code.
-- [ ] `supadata.test.ts`: recorded 200, 206, 202 then completed, 202 then failed, 400, 401, 402, 403, 404, 429, 500, 502, timeout.
-- [ ] `chain.test.ts` additions: direct blocked → Supadata ok; Supadata quota → `youtube_quota`.
-- [ ] `youtube-service.test.ts`: paragraphs and units, cap, cache hit.
+- [x] `parse-url.test.ts`: ≥ 20 positive shapes, every negative in reference §4, playlist, channel, handle.
+- [x] `direct.test.ts`: OK, consent wall once and twice, 429, recaptcha, bot check, age restricted, unavailable, other unplayable, live, upcoming, no captions, PO token, unparsable HTML.
+- [x] `pick-track.test.ts`: language preference order, manual before generated, same-code collision.
+- [x] `captions-xml.test.ts`: entities, tags stripped, missing `dur`, empty lines skipped, DTD rejected, billion-laughs input rejected.
+- [x] `chain.test.ts`: terminal stops, retryable falls through, all fail → last retryable code.
+- [x] `supadata.test.ts`: recorded 200, 206, 202 then completed, 202 then failed, 400, 401, 402, 403, 404, 429, 500, 502, timeout.
+- [x] `chain.test.ts` additions: direct blocked → Supadata ok; Supadata quota → `youtube_quota`.
+- [x] `youtube-service.test.ts`: paragraphs and units, cap, cache hit.
 
 ## M4 Ingestion UI
 

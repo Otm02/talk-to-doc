@@ -4,7 +4,8 @@ const FALLBACK = "PDF document";
 // Metadata titles are often placeholders left by the authoring tool.
 const PLACEHOLDER = /^(untitled|document\d*|microsoft word - .*|\.?pdf)$/i;
 
-function clean(raw: string): string {
+/** Strips controls and bidi overrides; also used for YouTube titles. */
+export function cleanTitle(raw: string): string {
   return (
     raw
       // Controls, BOM and bidi overrides: titles end up in prompts and in the UI.
@@ -24,11 +25,11 @@ export function resolveTitle(
   metadataTitle: string | undefined,
   fileName: string | undefined,
 ): string {
-  const fromMetadata = clean(metadataTitle ?? "");
+  const fromMetadata = cleanTitle(metadataTitle ?? "");
   if (fromMetadata && !PLACEHOLDER.test(fromMetadata)) return fromMetadata;
 
   // Browsers send a bare name, but strip any path in case another client does not.
   const base = (fileName ?? "").split(/[\\/]/).pop() ?? "";
-  const fromFile = clean(base.replace(/\.pdf$/i, ""));
+  const fromFile = cleanTitle(base.replace(/\.pdf$/i, ""));
   return fromFile || FALLBACK;
 }

@@ -1,0 +1,56 @@
+{
+  "playabilityStatus": {
+    "status": "OK"
+  },
+  "videoDetails": {
+    "videoId": "jNQXAC9IVRw",
+    "title": "Me at the zoo",
+    "lengthSeconds": "19",
+    "author": "jawed",
+    "isLiveContent": false
+  },
+  "captions": {
+    "playerCaptionsTracklistRenderer": {
+      "captionTracks": [
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=jNQXAC9IVRw&lang=en&fmt=srv3",
+          "name": {
+            "runs": [
+              {
+                "text": "English"
+              }
+            ]
+          },
+          "vssId": ".en",
+          "languageCode": "en",
+          "isTranslatable": true
+        },
+        {
+          "baseUrl": "https://www.youtube.com/api/timedtext?v=jNQXAC9IVRw&lang=de&fmt=srv3",
+          "name": {
+            "runs": [
+              {
+                "text": "German"
+              }
+            ]
+          },
+          "vssId": ".de",
+          "languageCode": "de",
+          "isTranslatable": true
+        }
+      ],
+      "audioTracks": [
+        {
+          "captionTrackIndices": [
+            0,
+            1
+          ],
+          "defaultCaptionTrackIndex": 0,
+          "hasDefaultTrack": true,
+          "captionsInitialState": "CAPTIONS_INITIAL_STATE_OFF_RECOMMENDED"
+        }
+      ],
+      "defaultAudioTrackIndex": 0
+    }
+  }
+}

@@ -9,7 +9,8 @@ export function buildCsp(isDev: boolean): string {
       ...(isDev ? ["'unsafe-eval'"] : []),
     ],
     "style-src": ["'self'", "'unsafe-inline'"],
-    "img-src": ["'self'", "data:", "blob:"],
+    // i.ytimg.com serves the video thumbnail shown on the document screen.
+    "img-src": ["'self'", "data:", "blob:", "https://i.ytimg.com"],
     "font-src": ["'self'"],
     "connect-src": [
       "'self'",
