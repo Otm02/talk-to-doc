@@ -19,5 +19,13 @@ export default defineConfig({
     environment: "node",
     setupFiles: ["./test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    coverage: {
+      provider: "v8",
+      // The realtime engine carries the review's "start, interrupt, follow
+      // up" test, so it is held to a bar; the rest is not gated.
+      include: ["src/features/voice/realtime/**"],
+      exclude: ["**/*.test.{ts,tsx}"],
+      thresholds: { lines: 90, functions: 90, statements: 90, branches: 90 },
+    },
   },
 });

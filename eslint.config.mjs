@@ -45,7 +45,12 @@ const eslintConfig = defineConfig([
   },
   {
     files: ["src/**/*.{ts,tsx}"],
-    ignores: ["src/server/env.ts", "src/**/*.test.{ts,tsx}"],
+    ignores: [
+      "src/server/env.ts",
+      // NEXT_PUBLIC_* only, never secrets (ARCHITECTURE section 2).
+      "src/lib/public-env.ts",
+      "src/**/*.test.{ts,tsx}",
+    ],
     rules: {
       "no-restricted-syntax": [
         "error",
@@ -63,6 +68,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "coverage/**",
     "next-env.d.ts",
   ]),
 ]);

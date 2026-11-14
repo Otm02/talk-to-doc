@@ -5,6 +5,7 @@ import {
   MAX_TURN_CHARS,
   buildInstructions,
 } from "../context/buildInstructions";
+import type { SessionResponse } from "@/lib/wire/session";
 import { getEnv } from "../env";
 import { catalogError } from "../errors";
 import { parseWith } from "../http";
@@ -42,14 +43,6 @@ export const SessionBodySchema = z.strictObject({
     .max(MAX_HISTORY_TURNS)
     .optional(),
 });
-
-/** The only fields the browser ever receives. */
-export interface SessionResponse {
-  clientSecret: string;
-  /** Unix seconds, as OpenAI reports it. */
-  expiresAt: number;
-  model: string;
-}
 
 /**
  * POST /api/realtime/session. Gates run before anything is read or paid for:
@@ -107,6 +100,7 @@ export async function createSession(
     clientSecret: secret.value,
     expiresAt: secret.expiresAt,
     model: secret.model,
+    maxSessionSeconds: env.maxSessionMinutes * 60,
   };
   const headers = new Headers({ "cache-control": "no-store" });
   if (identity.isNew) {

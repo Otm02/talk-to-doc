@@ -14,6 +14,11 @@ export const CLIENT_SECRET_TTL_SECONDS = 60;
 export const CLIENT_SECRET_TIMEOUT_MS = 10_000;
 // Cheapest transcription model that works with VAD over WebRTC (reference §6).
 export const TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
+// Caps one answer. Audio tokens count toward it (about 20 per second of
+// speech), so 800 is roughly 35 s. It matters for cost: a response is billed
+// for what it generated, not for what the user heard before talking over it,
+// and a live session without a cap generated 33 s of audio for one answer.
+export const MAX_OUTPUT_TOKENS = 800;
 
 export interface MintedSecret {
   /** The ephemeral key. The only part of the response the browser gets. */
@@ -92,6 +97,7 @@ export function buildSessionRequest(
       instructions: params.instructions,
       output_modalities: ["audio"],
       reasoning: { effort: settings.reasoningEffort },
+      max_output_tokens: MAX_OUTPUT_TOKENS,
       audio: {
         input: {
           transcription: { model: TRANSCRIPTION_MODEL },

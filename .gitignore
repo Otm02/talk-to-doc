@@ -47,3 +47,7 @@ next-env.d.ts
 /playwright-report/
 /test-results/
 .playwright-mcp/
+
+# Raw event recordings from the dev recorder: they contain whatever the document said.
+# Committed fixtures live in test/fixtures/realtime/ under other names, after review.
+realtime-session-*.jsonl

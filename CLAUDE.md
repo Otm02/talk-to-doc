@@ -14,11 +14,11 @@ The OpenAI key belongs to Genius and has a hard $20 limit enforced by OpenAI bil
 - Unit tests, e2e tests and CI never call the live OpenAI API. Use MockTransport and recorded fixtures.
 - Ask me before any step that calls the live API, and keep live sessions short.
 - Cost guards that stay: REALTIME_MODEL, CONTEXT_TOKEN_BUDGET (8000 by default, 20000 in final production), VOICE_ENABLED (kill switch), MAX_SESSION_MINUTES, per-IP rate limiting and DAILY_SESSION_CAP. POST /api/session enforces them, and maps OpenAI's quota or billing-limit error to 503 `budget_exhausted`.
-- The client shows a dev-only overlay that estimates tokens and cost from response.done events. Nothing is reported to the server.
+- The client shows a cost overlay, in development or with ?debug=1, that estimates tokens and cost from response.done events. Nothing is reported to the server. The same flag gates the event recorder.
 
 ## Commands
 - pnpm dev, pnpm build, pnpm start
-- pnpm check: lint + typecheck + unit tests. Must pass before you report any task done.
+- pnpm check: lint + typecheck + unit tests with coverage (90% gate on src/features/voice/realtime). Must pass before you report any task done.
 - pnpm test, pnpm test:e2e, pnpm format
 
 ## Architecture rules

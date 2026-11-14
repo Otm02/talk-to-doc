@@ -19,8 +19,8 @@ Every live call is asked for first and kept short. Costs are estimates on gpt-re
 | Milestone | Checkpoint | Est. cost |
 |---|---|---|
 | M5 | One `client_secrets` mint to confirm the response shape | $0 (documented as free) |
-| M6 | ~2 min session: record event fixtures, settle UNVERIFIED items | ~$0.05 |
-| M7 | Phone check of voice and text UI on a preview | ~$0.10 |
+| M6 | ~2 min voice session: record the event fixture, measure cost (done 2026-11-14, about $0.04) | ~$0.05 |
+| M7 | Phone check of voice and text UI on a preview; also the live checks deferred from M6: text mode with the receive-only audio offer and a text reply, the `/calls` status code and `Location`, the billing error shape | ~$0.10 |
 | M8 | iPhone Safari and Android Chrome polish pass | ~$0.10 |
 | M9 | One network drop and reconnect on a phone | ~$0.10 |
 | M11 | Production smoke on mini | ~$0.10 |
@@ -174,20 +174,20 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - `transport.ts` interface; `webrtc-transport.ts` (peer connection, `oai-events` channel created before the offer, mic track with echo cancellation, noise suppression and AGC, recvonly or silent track for text mode, `/v1/realtime/calls` exchange with `res.ok` check, ICE and channel state events); `mock-transport.ts` (scripted and fixture replay).
 - `events.ts`: zod schemas for every server event in reference §3; unknown types become `ignored`.
 - `reducer.ts`: the state machine in ARCHITECTURE §6, the transcript model ordered by `previous_item_id`, interruption marking, recoverable vs fatal errors.
-- `use-realtime-session.ts`: mint, connect, max-session, idle and hidden-tab timers, Stop (`response.cancel` then `output_audio_buffer.clear`), mute (`track.enabled`), send text, full cleanup.
-- Dev-only cost overlay (`src/features/voice/dev-cost`): price table with fetch date, estimates tokens and cost from `response.done` and transcription usage, tested by hand-priced fixtures; stripped from production, nothing reported to the server.
-- **[LIVE: ask first, ~2 min on mini, ~$0.05]** record real event logs into `test/fixtures/realtime/` and settle: the recvonly offer for no mic, `output_modalities` on `response.create`, the `/calls` success status and `Location` header, the error shape for billing. Update reference §2 and §3 and the cost model in SPEC §7.2 with measured numbers.
+- `session.ts` (controller) and `use-voice-session.ts` (the one hook): mint, connect, max-session, idle and hidden-tab timers, Stop (`response.cancel` then `output_audio_buffer.clear`), mute (`track.enabled`), send text, full cleanup. Temporary `/dev/voice` page for the live checkpoint; removed in M7.
+- Cost overlay (`src/features/voice/dev-cost`): price table with fetch date, estimates tokens and cost from `response.done` and transcription usage, tested by hand-priced fixtures; shown in development or with `?debug=1` (so a preview can be read on a phone), nothing reported to the server.
+- **[LIVE: ask first, ~2 min on mini, ~$0.05]** record real event logs into `test/fixtures/realtime/` and settle the UNVERIFIED items. **Done 2026-11-14 (voice only):** one real session recorded (`live-session-1.jsonl`, text replaced with synthetic text) and the measured cost added to SPEC §7.2. **Deferred to the M7 live checkpoint:** text mode with the receive-only audio offer, the `/calls` success status and `Location` header, and the error shape for billing.
 
 **Acceptance criteria**
 - [ ] Replaying the recorded fixtures through the mock transport produces the right transcript and states.
-- [ ] Every UNVERIFIED item in reference §2 is resolved and the reference updated.
+- [~] UNVERIFIED items in reference §2: `output_modalities` placement and client item ids are confirmed from the docs. The M6 live session was voice only, so text mode (receive-only offer), the `/calls` status and `Location`, and the billing error shape are **deferred to the M7 live checkpoint**.
 - [ ] No leak after 20 start/end cycles in a test (tracks stopped, connections closed, timers cleared).
 
 **Tests**
 - [ ] `events.test.ts`: every handled event parses; unknown and malformed events are ignored, not thrown.
 - [ ] `reducer.test.ts`: every transition in the diagram, out-of-order transcription, barge-in (`turn_detected`), client cancel, `response.done` statuses, recoverable error, fatal billing error, reconnect entry and exit.
 - [ ] `webrtc-transport.test.ts` with a fake `RTCPeerConnection`: channel before offer, non-OK SDP response, ICE events mapped, close releases everything.
-- [ ] `use-realtime-session.test.ts`: mint failure, guard error, usage posted per response, timers end the session, cleanup on unmount.
+- [ ] `session.test.ts` and `use-voice-session.test.tsx` (the hook is `use-voice-session.ts`): mint failure, guard error, usage priced per response (nothing is posted), timers end the session, cleanup on unmount.
 
 ## M7 Voice and text UI
 
@@ -197,7 +197,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - Text mode composer pinned above the keyboard using `visualViewport`; automatic switch on `mic_denied`, `mic_not_found` and `mic_in_use`.
 - Session timer with the 1-minute warning; every session and budget error card from SPEC §4.2 and §4.3; Start disabled up front when `/api/limits` reports a trip.
 - e2e builds use `NEXT_PUBLIC_REALTIME_TRANSPORT=mock`.
-- **[LIVE: ask first, ~$0.10]** phone check on a preview: ask, interrupt, follow up (MC-3).
+- **[LIVE: ask first, ~$0.10]** phone check on a preview: ask, interrupt, follow up (MC-3). Also settle what M6 deferred: a text-mode session (receive-only audio offer, `output_modalities: ["text"]` reply), the `/calls` success status and `Location`, and the billing error shape; update reference §2 and §3.
 
 **Acceptance criteria**
 - [ ] Every state in SPEC §3.3 and §3.4 is reachable in e2e with the mock transport.

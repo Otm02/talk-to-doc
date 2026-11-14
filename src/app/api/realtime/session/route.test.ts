@@ -103,6 +103,7 @@ interface SentRequest {
       instructions: string;
       output_modalities: string[];
       reasoning: { effort: string };
+      max_output_tokens: number;
       audio: {
         input: {
           transcription: { model: string };
@@ -149,6 +150,7 @@ beforeEach(async () => {
     "REALTIME_MODEL",
     "REALTIME_VOICE",
     "REALTIME_REASONING_EFFORT",
+    "MAX_SESSION_MINUTES",
     "VERCEL",
     "VERCEL_ENV",
   ]) {
@@ -180,7 +182,7 @@ afterEach(() => {
 });
 
 describe("POST /api/realtime/session: success", () => {
-  it("returns only the secret, its expiry and the model", async () => {
+  it("returns only the secret, its expiry, the model and the chat length cap", async () => {
     const res = await post({ documentId: PDF_ID });
 
     expect(res.status).toBe(200);
@@ -191,6 +193,7 @@ describe("POST /api/realtime/session: success", () => {
       clientSecret: SECRET,
       expiresAt: EXPIRES_AT,
       model: "gpt-realtime-2.1-mini",
+      maxSessionSeconds: 300,
     });
     const raw = JSON.stringify(body);
     expect(raw).not.toContain(API_KEY);
@@ -218,6 +221,8 @@ describe("POST /api/realtime/session: success", () => {
     expect(session.model).toBe("gpt-realtime-2.1-mini");
     expect(session.output_modalities).toEqual(["audio"]);
     expect(session.reasoning).toEqual({ effort: "low" });
+    // Bounds one answer (~35 s of speech); billing counts what is generated.
+    expect(session.max_output_tokens).toBe(800);
     expect(session.audio.output).toEqual({ voice: "marin" });
     expect(session.audio.input.transcription).toEqual({
       model: "gpt-4o-mini-transcribe",
@@ -235,6 +240,14 @@ describe("POST /api/realtime/session: success", () => {
     expect(session).not.toHaveProperty("modalities");
     expect(session).not.toHaveProperty("voice");
     expect(session).not.toHaveProperty("temperature");
+    expect(session).not.toHaveProperty("max_response_output_tokens");
+  });
+
+  it("tells the client how long a chat may last, from MAX_SESSION_MINUTES", async () => {
+    vi.stubEnv("MAX_SESSION_MINUTES", "2");
+    resetEnvCacheForTests();
+    const res = await post({ documentId: PDF_ID });
+    expect((await res.json()).maxSessionSeconds).toBe(120);
   });
 
   it("takes model, voice and reasoning effort from env", async () => {
