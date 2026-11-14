@@ -152,7 +152,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - `src/server/context`: token count, budget cap by whole units, last-unit cut, markers, `<reference_material>` fence with escaping, title sanitizing, `<conversation_so_far>` fence for reconnects, coverage object.
 - `src/server/realtime/client-secrets.ts`: adapter with 10 s timeout, typed errors (billing codes from reference §3, 4xx config, 5xx busy), never logs the key.
 - `src/server/guard`: kill switch, IP limit (fail closed), `DAILY_SESSION_CAP` via `RateLimiter.countDaily`.
-- `src/server/session/service.ts` and `POST /api/session` (enforces `VOICE_ENABLED`, the per-IP limit and `DAILY_SESSION_CAP`; maps OpenAI's quota or billing-limit error to 503 `budget_exhausted`); `GET /api/limits`.
+- `src/server/session/service.ts` and `POST /api/realtime/session` (enforces `VOICE_ENABLED`, the per-IP limit and `DAILY_SESSION_CAP`; maps OpenAI's quota or billing-limit error to 503 `budget_exhausted`); `GET /api/limits`.
 - **[LIVE: ask first, $0]** one mint to confirm the response shape; recorded as a fixture with the secret value replaced.
 
 **Acceptance criteria**
@@ -166,7 +166,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - [ ] `build-instructions.test.ts`: fence shape, escaping variants (case, spaces), title sanitizing, reconnect fence and its cap, injection fixtures.
 - [ ] `client-secrets.test.ts`: recorded 200, 400, 404, 429 with each billing code, 5xx, timeout.
 - [ ] `guard.test.ts`: every trip, limiter timeout denies, reconnect does not count against the daily cap.
-- [ ] `src/app/api/session/route.test.ts`: zod, unknown document, each guard code, billing error → 503 `budget_exhausted`.
+- [ ] `src/app/api/realtime/session/route.test.ts`: zod, unknown document, each guard code, billing error → 503 `budget_exhausted`.
 
 ## M6 Realtime engine
 
@@ -261,7 +261,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 **Acceptance criteria**
 - [ ] Every threat T-01 to T-16 has a passing test or a documented CI check.
 - [ ] Contract suite passes against memory in CI and against Upstash locally.
-- [ ] A burst of 30 mint requests from one IP gets 6 secrets and then `budget_ip_rate`.
+- [ ] A burst of 30 mint requests from one IP gets 5 secrets and then `rate_limited`.
 
 **Tests**
 - [ ] `*.contract.test.ts` for Upstash adapters (local only).

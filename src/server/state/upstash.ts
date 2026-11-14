@@ -61,6 +61,14 @@ export function createUpstashRateLimiter(
         remaining: Math.max(0, cap - count),
       };
     },
+    async peekDaily(key) {
+      const raw = await redis.get<string | number>(
+        `${PREFIX}:daily:${key}:${dayKey(clock.now())}`,
+      );
+      // automaticDeserialization is off, so a counter comes back as a string.
+      const count = raw === null ? 0 : Number(raw);
+      return Number.isFinite(count) ? count : 0;
+    },
     async limit(key, rule) {
       const id = `${rule.max}:${rule.windowMs}`;
       let rl = limiters.get(id);

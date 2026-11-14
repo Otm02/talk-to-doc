@@ -135,6 +135,17 @@ export function runStateContract(
         ).toBe(true);
       });
 
+      it("peekDaily reads the count without adding to it", async () => {
+        const { adapters } = await make();
+        const key = crypto.randomUUID();
+        expect(await adapters.rateLimiter.peekDaily(key)).toBe(0);
+        await adapters.rateLimiter.countDaily(key, 5);
+        await adapters.rateLimiter.countDaily(key, 5);
+        expect(await adapters.rateLimiter.peekDaily(key)).toBe(2);
+        expect(await adapters.rateLimiter.peekDaily(key)).toBe(2);
+        expect((await adapters.rateLimiter.countDaily(key, 5)).count).toBe(3);
+      });
+
       it("starts fresh on the next UTC day", async () => {
         const h = await make();
         if (!h.canJumpDays) return;

@@ -56,6 +56,9 @@ export function createMemoryRateLimiter(
       daily.set(id, count + 1);
       return { allowed: true, count: count + 1, remaining: cap - count - 1 };
     },
+    async peekDaily(key) {
+      return daily.get(`${key}:${dayKey(clock.now())}`) ?? 0;
+    },
     async limit(key, rule: RateRule): Promise<RateResult> {
       const now = clock.now();
       const recent = (hits.get(key) ?? []).filter(

@@ -23,6 +23,9 @@ export type YoutubeDocumentRecord = {
   sourceType: "youtube";
   videoId: string;
   title: string;
+  /** Kept so session instructions can say how long the video is and in what language. */
+  durationSec: number;
+  language: string;
   context: string;
   stats: YoutubeStats;
   coverage: number;

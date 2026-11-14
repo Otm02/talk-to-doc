@@ -24,7 +24,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | FR-ING-06 | Extracted text is shown in a collapsible preview | The document screen has a collapsible full-text panel with page or timestamp markers. Pages render as they stream in | `src/features/document/text-preview.test.tsx`, `e2e/ingest-pdf.spec.ts` | M4 |
 | FR-CTX-01 | Extracted text becomes context for the Realtime session | The server builds session instructions from DocumentStore (never from client-sent text), fences them as untrusted, and mints the client secret with them already in place | `src/server/context/build-instructions.test.ts`, `src/server/session/service.test.ts` | M5 |
 | FR-CTX-02 | No chunking, summarizing or citations needed | Out of scope. The only reduction is the `CONTEXT_TOKEN_BUDGET` cap, with a visible coverage notice | `src/server/context/budget.test.ts` | M5 |
-| FR-VOICE-01 | A **Start Voice Chat** button opens a live Realtime session | The button runs mic permission, then `POST /api/session`, then the WebRTC connect, with visible state at each step | `src/features/voice/realtime/use-realtime-session.test.ts`, `e2e/voice.spec.ts` | M6, M7 |
+| FR-VOICE-01 | A **Start Voice Chat** button opens a live Realtime session | The button runs mic permission, then `POST /api/realtime/session`, then the WebRTC connect, with visible state at each step | `src/features/voice/realtime/use-realtime-session.test.ts`, `e2e/voice.spec.ts` | M6, M7 |
 | FR-VOICE-02 | User asks by voice and hears spoken answers in real time | Mic track goes up, the remote audio track plays. `semantic_vad` with `interrupt_response: true` enables barge-in | `src/features/voice/realtime/reducer.test.ts`, MC-3 | M6, M7 |
 | FR-VOICE-03 | Live text transcript of the conversation | Reducer merges `conversation.item.input_audio_transcription.*` and `response.output_audio_transcript.*`, ordered by `previous_item_id`. Rendered in an `aria-live="polite"` log | `reducer.test.ts`, `src/features/voice/ui/transcript.test.tsx` | M6, M7 |
 | FR-VOICE-04 | Text chat fallback when no microphone is available | Mic denied, missing or busy switches to text mode on the same Realtime session (recvonly audio or a silent track). Text mode can also be chosen by hand | `use-realtime-session.test.ts`, `e2e/text-mode.spec.ts` (WebKit, no fake mic) | M6, M7 |
@@ -33,7 +33,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | FR-UI-03 | Visible connection status and conversation flow | Status pill driven by the state machine (connecting, listening, thinking, speaking, reconnecting…), a mic level meter, and speaker labels in the transcript | `status-pill.test.tsx`, `e2e/voice.spec.ts` | M7 |
 | FR-UI-04 | Intuitive and responsive across mobile devices | Every async action has idle, working, success and error-with-retry states (section 3). Reduced motion respected | `e2e/states.spec.ts`, MC-4 | M4, M7, M8 |
 | FR-SEC-01 | API keys never reach the client | Secrets are read only in `src/server/env.ts`; no `NEXT_PUBLIC_` secrets; `server-only` imports; lint rule against client imports of `src/server`; build output grep in CI | `src/server/env.test.ts`, CI step `scripts/check-bundle-secrets.ts` | M1, M10 |
-| FR-SEC-02 | Realtime connects only with ephemeral tokens or authenticated backend routes | `POST /v1/realtime/client_secrets` on the server, 60 s TTL. The browser receives only `value` and `expires_at` | `src/server/realtime/client-secrets.test.ts`, `src/app/api/session/route.test.ts` | M5 |
+| FR-SEC-02 | Realtime connects only with ephemeral tokens or authenticated backend routes | `POST /v1/realtime/client_secrets` on the server, 60 s TTL. The browser receives only `value` and `expires_at` | `src/server/realtime/client-secrets.test.ts`, `src/app/api/realtime/session/route.test.ts` | M5 |
 | FR-DOC-01 | README has setup and run steps | README: prerequisites, `pnpm i`, `.env.local` from `.env.example`, `pnpm dev`, tests | README review (MC-9) | M1, M13 |
 | FR-DOC-02 | README has a short technical overview and the trade-offs | README overview links to ARCHITECTURE.md; trade-offs section | MC-9 | M13 |
 | FR-DOC-03 | README documents env configuration | Env table generated from the zod schema comments; `.env.example` | MC-9, `env.test.ts` | M1, M13 |
@@ -201,6 +201,7 @@ Private videos map to `youtube_unavailable` because neither YouTube's player res
 | `mic_denied` | — | Microphone access is off. You can type instead, or allow the mic in your browser settings. | Type instead (auto) |
 | `mic_not_found` | — | No microphone found. You can type your questions instead. | Type instead (auto) |
 | `mic_in_use` | — | Your microphone is busy in another app. Close it and try again, or type instead. | Try again / Type instead |
+| `doc_not_found` | 404 | We couldn't find that document. Please add the source again. | Add the source again |
 | `session_connect_failed` | 502 | Couldn't connect to voice chat. Try again. | Try again |
 | `session_upstream_busy` | 503 | The voice service is busy. Try again in a moment. | Try again |
 | `session_reconnect_failed` | — | Connection lost. Check your network and try again. | Try again |
@@ -215,12 +216,12 @@ Private videos map to `youtube_unavailable` because neither YouTube's player res
 
 Text mode and voice share these guards. Ingestion and the preview never depend on them.
 
-| code | HTTP | Trips when | Copy |
+| code | HTTP | Copy | Trips when |
 |---|---|---|---|
-| `budget_voice_disabled` | 503 | `VOICE_ENABLED=false` (kill switch) | Voice chat is turned off right now. You can still read the document. |
-| `budget_ip_rate` | 429 | Per-IP mint limit hit | You've started a lot of chats. Wait {minutes} min and try again. |
-| `budget_daily_sessions` | 429 | `DAILY_SESSION_CAP` reached (UTC day) | Today's voice chats are used up. You can still read the document. Try again tomorrow. |
-| `budget_exhausted` | 503 | OpenAI returns `credit_balance_exhausted`, `project_spend_limit_exceeded`, `organization_spend_limit_exceeded`, `organization_usage_limit_exceeded` or `insufficient_quota` (never retried; nothing is latched, the next mint simply tries again) | Voice chat is unavailable because the API budget is used up. You can still read the document. |
+| `voice_disabled` | 503 | Voice is paused right now; the extracted text still works. | `VOICE_ENABLED=false` (kill switch) |
+| `rate_limited` | 429 | Too many tries. Wait a minute and try again. | Per-IP mint limit hit (5 per 10 min); `Retry-After` carries the real wait |
+| `daily_limit` | 429 | The demo's voice sessions for today are used up. | Today's session starts are at or over `DAILY_SESSION_CAP` (UTC day) |
+| `budget_exhausted` | 503 | The demo's API budget is used up; the extracted text still works. | OpenAI returns `credit_balance_exhausted`, `project_spend_limit_exceeded`, `organization_spend_limit_exceeded`, `organization_usage_limit_exceeded` or `insufficient_quota` (never retried; nothing is latched, the next mint simply tries again) |
 
 ## 5. Edge cases
 
@@ -324,15 +325,15 @@ OpenAI enforces the hard $20 limit on the key, for the build, QA, the video and 
 
 ### 7.4 Guards
 
-`POST /api/session` enforces, in order: `VOICE_ENABLED`, the per-IP limit, `DAILY_SESSION_CAP`. If OpenAI answers with a quota or billing-limit error, the route maps it to 503 `budget_exhausted` and never retries.
+`POST /api/realtime/session` enforces, in order: `VOICE_ENABLED`, the per-IP limit, `DAILY_SESSION_CAP`. If OpenAI answers with a quota or billing-limit error, the route maps it to 503 `budget_exhausted` and never retries.
 
 | Guard | Default (dev / prod) | What it does | What the user sees |
 |---|---|---|---|
 | `REALTIME_MODEL` | mini / mini, then 2.1 at the end of M13 | model in the minted session | — |
 | `CONTEXT_TOKEN_BUDGET` | 8000 / 20000 | caps instruction size | coverage notice |
-| `VOICE_ENABLED` | true / true | kill switch, checked on every mint and by `/api/limits` | `budget_voice_disabled` |
-| Per-IP mint limit | 10 per 10 min / 6 per 10 min and 20 per day | sliding window; **fails closed** on limiter timeout | `budget_ip_rate` |
-| `DAILY_SESSION_CAP` | 50 / 25 | daily fixed-window counter in RateLimiter, keyed by UTC date (memory locally, Upstash on Vercel); reconnects of the same session within 10 min do not count | `budget_daily_sessions` |
+| `VOICE_ENABLED` | true / true | kill switch, checked on every mint and by `/api/limits` | `voice_disabled` |
+| Per-IP mint limit | 5 per 10 min | sliding window; **fails closed** on limiter timeout | `rate_limited` |
+| `DAILY_SESSION_CAP` | 50 / 25 | daily fixed-window counter in RateLimiter, keyed by UTC date (memory locally, Upstash on Vercel); reconnects of the same session within 10 min do not count | `daily_limit` |
 | `MAX_SESSION_MINUTES` | 5 | client ends the chat; warning 1 min before | warning toast, then `session_max_duration` |
 | Idle hang-up | 120 s with no speech and no response | client ends the chat | `session_idle` |
 | Hidden tab | 60 s `visibilityState = hidden` | client ends the chat | `session_hidden` |
