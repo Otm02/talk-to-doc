@@ -201,11 +201,12 @@ Private videos map to `youtube_unavailable` because neither YouTube's player res
 | `mic_denied` | — | Microphone access is off. You can type instead, or allow the mic in your browser settings. | Type instead (auto) |
 | `mic_not_found` | — | No microphone found. You can type your questions instead. | Type instead (auto) |
 | `mic_in_use` | — | Your microphone is busy in another app. Close it and try again, or type instead. | Try again / Type instead |
+| `mic_unavailable` | — | The microphone isn't available here. You can type your questions instead. | Type instead (auto) |
 | `doc_not_found` | 404 | We couldn't find that document. Please add the source again. | Add the source again |
 | `session_connect_failed` | 502 | Couldn't connect to voice chat. Try again. | Try again |
 | `session_upstream_busy` | 503 | The voice service is busy. Try again in a moment. | Try again |
 | `session_reconnect_failed` | — | Connection lost. Check your network and try again. | Try again |
-| `session_max_duration` | — | This chat reached its 10-minute limit. Start a new one to keep going. | Start again |
+| `session_max_duration` | — | This chat reached its N-minute limit. Start a new one to keep going. (N is `MAX_SESSION_MINUTES`; the session response carries it as `maxSessionSeconds`.) | Start again |
 | `session_idle` | — | Chat ended after 2 minutes of silence. Start again when you're ready. | Start again |
 | `session_hidden` | — | Chat ended because the app was in the background. | Start again |
 | `rate_limited` | 429 | Too many tries. Wait a minute and try again. | Try again (after `Retry-After`) |
@@ -317,7 +318,26 @@ Assumptions for one 5-minute active chat: 10 turns, the user speaks 8 s (80 audi
 | Transcription (80 s) | $0.004 | $0.004 | $0.004 |
 | **Total** | **≈ $0.49** | **≈ $0.13** | **≈ $0.12** |
 
-A full 10-minute chat costs roughly double that, because history re-sends grow with each turn: about $0.95 on 2.1. The first live checkpoint in M6 replaces these assumptions with measured numbers, and this table is updated.
+A full 10-minute chat costs roughly double that, because history re-sends grow with each turn: about $0.95 on 2.1. 
+
+**Measured in M6 (2026-11-14, `gpt-realtime-2.1-mini`, desktop Chrome, `reasoning.effort: low`, `semantic_vad`).** One voice chat of about 74 s: 5 questions about a one-page PDF (instructions about 3,400 characters, roughly 780 text tokens), 3 of the answers cut off by the user talking over them. Priced from the `usage` blocks of the five `response.done` events and the five input-transcription events (recorded as `test/fixtures/realtime/live-session-1.jsonl`; the golden test pins these numbers):
+
+| Line | Tokens | Cost |
+|---|---|---|
+| Text in, uncached | 1,239 | $0.00074 |
+| Text in, cached | 3,456 | $0.00021 |
+| Audio in, uncached | 212 | $0.00212 |
+| Audio in, cached | 128 | $0.00004 |
+| Text out | 604 | $0.00145 |
+| Audio out | 1,669 | $0.03338 |
+| Transcription (`gpt-4o-mini-transcribe`, tokens) | 148 | $0.00036 |
+| **Total** | **7,456** | **$0.0383** |
+
+What it shows:
+- Audio out is 87% of the cost. Everything else together is about 5 cents per 10 minutes at this document size.
+- **Output is billed for what was generated, not what was heard.** The third answer was cut off after 3.3 s of playback, yet its `response.done` reported 660 audio tokens (33 s). Barge-in saves nothing already generated, which is why `max_output_tokens` is capped (section 7.4).
+- The prompt cache works: cached text input was 0, 768, 768, 896 and 1,024 tokens on turns 1 to 5. `reasoning_tokens` are part of `text_tokens`, not an extra charge.
+- This document is far smaller than the 8k and 20k budgets above, so the instruction lines will be larger with a real document. The assumptions table is not yet re-fitted; do that from a longer measured session at the M7 live checkpoint.
 
 ### 7.3 Where the money is capped
 
@@ -337,13 +357,13 @@ OpenAI enforces the hard $20 limit on the key, for the build, QA, the video and 
 | `MAX_SESSION_MINUTES` | 5 | client ends the chat; warning 1 min before | warning toast, then `session_max_duration` |
 | Idle hang-up | 120 s with no speech and no response | client ends the chat | `session_idle` |
 | Hidden tab | 60 s `visibilityState = hidden` | client ends the chat | `session_hidden` |
-| `max_output_tokens` | 1024 per response | bounds one runaway answer | — |
+| `max_output_tokens` | 800 per response (audio tokens count: about 20 per second) | bounds one runaway answer to roughly 35 s of speech | — |
 | Client secret TTL | 60 s | short window to start a session | — |
 | OpenAI quota or billing error | — | never retried | `budget_exhausted` |
 | Supadata credit guard | — / 80 per month, 1 req/s global | protects the 100-credit free plan | `youtube_quota` |
 | Upload limits | 20 per hour per IP, 150 per day global | protects Blob's 2,000 advanced ops per month and the 30-day lock-out | `rate_limited` |
 
-Dev-only cost overlay: in development builds the client estimates tokens and cost from each `response.done` usage block (price table from 7.1, `src/features/voice/dev-cost`). It is for the developer's eyes, stripped from production builds, and nothing is reported to the server.
+Dev-only cost overlay: the client estimates tokens and cost from each `response.done` usage block and each input-transcription usage block (price table from 7.1, `src/features/voice/realtime/prices.ts`, overlay in `src/features/voice/dev-cost`). It shows in development builds, or in any build when the URL has `?debug=1` (also gates the event recorder), so a phone or a preview can be checked. It is for the developer's eyes and nothing is reported to the server.
 
 ## 8. Security model
 

@@ -40,15 +40,24 @@ src/
     ingest/                         source switch, file picker, URL field, upload client, NDJSON reader
     document/                       header, notices, collapsible text preview
     voice/
-      realtime/                     protocol only, no React UI
-        transport.ts                RealtimeTransport interface
-        webrtc-transport.ts         RTCPeerConnection + data channel + mic/silent track
-        mock-transport.ts           scriptable, replays recorded fixtures (tests, e2e)
-        events.ts                   zod schemas for GA server events; unknown types → ignored
-        reducer.ts                  pure state machine + transcript model
-        use-realtime-session.ts     the one hook: mint, connect, events, timers, cleanup
-      ui/                           status pill, transcript, controls, composer, mic meter
-      dev-cost/                     dev-only overlay: price table, tokens and cost from response.done; never reported
+      realtime/                     the engine: protocol only, no UI. Framework-agnostic core + one hook
+        transport.ts                RealtimeTransport interface, TransportError kinds
+        webrtc-transport.ts         RTCPeerConnection + "oai-events" channel; connected only after open + session.created; 15 s deadline
+        mock-transport.ts           scripted server (timed steps + replies to client events); scriptFromRecording() replays a recorded session
+        mock-scenarios.ts, mock-names.ts   named scripts for tests and e2e (?mockRealtime=<name>); names kept apart so the mock stays a lazy chunk
+        transport-factory.ts        mock (dev or mock build, ?mockRealtime=) or WebRTC
+        events.ts                   zod union for handled GA server events; known-but-unused events ignored, others counted, never thrown
+        state.ts, transcript.ts     state shape; previous_item_id ordering (epoch, then chains, arrival only as tie-break)
+        reducer.ts                  pure (state, action) => state: transcript, interruption, activity, connection
+        session.ts                  VoiceSession controller: mic, mint, transport, timers, cleanup; deps injected
+        session-deps.ts, mint.ts, mic.ts, audio.ts, levels.ts   browser wiring, mint client, getUserMedia, tap-time audio objects, AnalyserNode meters
+        client-events.ts, failure.ts, usage.ts   events we send, client-side codes and copy, token totals
+        prices.ts, cost.ts          per-model rates (with fetch date) and the session cost estimate
+        recorder.ts                 dev-only JSONL event log; redacts instructions and secrets
+        use-voice-session.ts        the one hook: state, actions, level feed, estimated cost
+      ui/                           status pill, transcript, controls, composer, mic meter (M7)
+      dev-cost/                     dev-only overlay (cost-overlay.tsx): shown in development or with ?debug=1; never reported
+  app/dev/voice/                    temporary M6 harness page; removed in M7
   server/                           server-only (import "server-only"); never imported by client code
     env.ts                          the only reader of process.env; zod schema
     errors/                         AppError (code from the catalog, cause kept for logs)
@@ -333,9 +342,16 @@ stateDiagram-v2
 
 Transcript model: items keyed by `item_id`, placed by `previous_item_id` (input transcription can arrive late), text built from deltas and replaced by the `done` text. A response ending with `status: "cancelled"` and `reason: "turn_detected"` or `"client_cancelled"` marks its item interrupted. `error` events are recoverable unless their code is a billing code. Cleanup on every exit path: stop tracks, close the data channel and peer connection, clear timers, release the Wake Lock, detach the audio element.
 
+As built in M6 (the diagram's `minting` and `error` are `connecting{phase}` and `failed{code}`; `ending` is not a state because cleanup is synchronous):
+- Only the *current* response, or the one whose audio is playing, may move `activity`. A barge-in (`speech_started` during a response) marks the answer interrupted, keeps the words generated so far, freezes it (later deltas and `.done` text are dropped) and forgets that response, so its late `response.done` and `output_audio_buffer.cleared` never flip the UI back to "listening". An interrupted answer with no words is hidden but stays in the chain.
+- Stop sends `response.cancel`, then `output_audio_buffer.clear` (voice only), and records both event ids as benign so a "nothing to cancel" error is swallowed.
+- A typed message is a local `sending` bubble with a client item id, reconciled by the server's `conversation.item.added` for the same id. Asking while an answer is in progress cancels it first.
+- Idle (120 s with no speech and no response; speaking is never idle), hidden tab (60 s) and the session cap (warning at 60 s left) are timers in the controller. An ICE `disconnected` shows `reconnecting` for a 5 s grace; M6 then fails with `session_reconnect_failed` (re-minting is M9).
+- Terminal states are sticky: a late failure cannot overwrite `ended`. Every exit path runs one idempotent cleanup.
+
 ## 7. Session configuration (server-built)
 
-From reference §1, all GA names: `session.type: "realtime"`, `model: env.REALTIME_MODEL`, `instructions` (section 6 of SPEC), `output_modalities: ["audio"]` (text mode sets `["text"]` per `response.create`, field placement confirmed in the M6 live checkpoint), `reasoning.effort: "low"`, `max_output_tokens: 1024`, `audio.input.transcription.model: "gpt-4o-mini-transcribe"`, `audio.input.noise_reduction.type: "near_field"`, `audio.input.turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true }`, `audio.output.voice: "marin"`, `expires_after: { anchor: "created_at", seconds: 60 }`.
+From reference §1, all GA names: `session.type: "realtime"`, `model: env.REALTIME_MODEL`, `instructions` (section 6 of SPEC), `output_modalities: ["audio"]` (text mode sets `["text"]` per `response.create`; the field placement is confirmed in the docs (2026-11-14), but text mode has not been run live: that check, with the receive-only audio offer, is deferred to the M7 live checkpoint), `reasoning.effort: "low"`, `max_output_tokens: 800` (audio tokens count toward it, at about 20 per second, so this bounds one answer to roughly 35 s of speech; a live session without it generated 33 s for one answer), `audio.input.transcription.model: "gpt-4o-mini-transcribe"`, `audio.input.noise_reduction.type: "near_field"`, `audio.input.turn_detection: { type: "semantic_vad", eagerness: "auto", create_response: true, interrupt_response: true }`, `audio.output.voice: "marin"`, `expires_after: { anchor: "created_at", seconds: 60 }`.
 
 ## 8. Environment
 

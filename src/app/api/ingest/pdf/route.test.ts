@@ -237,7 +237,9 @@ describe("413: too large", () => {
     // Past the size guard it is just a broken file, not a "too large" one.
     const res = await POST(upload(exact));
     await expectError(res, 422, "pdf_corrupted");
-  });
+    // Moves 25 MB through the handler: ~2 s normally, but code coverage slows
+    // it past the 5 s default, and `pnpm check` now runs with coverage.
+  }, 30_000);
 });
 
 describe("415: not a PDF", () => {

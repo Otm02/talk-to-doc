@@ -1,0 +1,1052 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  makeHarness,
+  type Harness,
+  type HarnessOptions,
+} from "@test/realtime/harness";
+import { transcript } from "@test/realtime/script";
+import { ev } from "./wire-events";
+import { MintError } from "./mint";
+import { scenarioScript } from "./mock-scenarios";
+import { MockTransport } from "./mock-transport";
+import type { LevelMeter } from "./levels";
+import {
+  CAP_WARNING_MS,
+  HIDDEN_MS,
+  IDLE_MS,
+  RECONNECT_GRACE_MS,
+  failureForTransportError,
+} from "./session";
+import { TransportError } from "./transport";
+
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
+const settle = (ms = 1) => vi.advanceTimersByTimeAsync(ms);
+
+async function started(
+  mode: "voice" | "text" = "voice",
+  options: HarnessOptions = {},
+): Promise<Harness> {
+  const h = makeHarness(options);
+  h.session.start(mode);
+  await settle(50);
+  return h;
+}
+
+const status = (h: Harness) => h.session.getState().connection.status;
+const sentTypes = (h: Harness) => h.transport.sent.map((e) => e.type);
+
+describe("starting a chat", () => {
+  it("does everything the browser needs from the tap before its first await", () => {
+    const h = makeHarness();
+    h.session.start("voice");
+    // Same tick: nothing has been awaited yet.
+    expect(h.requestMic).toHaveBeenCalledOnce();
+    expect(h.deps.createAudioElement).toHaveBeenCalledOnce();
+    expect(h.deps.createAudioContext).toHaveBeenCalledOnce();
+    expect(status(h)).toBe("requestingMic");
+    expect(h.mint).not.toHaveBeenCalled();
+  });
+
+  it("walks requestingMic → minting → negotiating → connected with the mic", async () => {
+    const h = makeHarness({ script: { connectDelayMs: 100, steps: [] } });
+    const seen: string[] = [];
+    h.session.subscribe(() => {
+      const c = h.session.getState().connection;
+      const label =
+        c.status === "connecting" ? `connecting:${c.phase}` : c.status;
+      if (label !== "idle" && seen.at(-1) !== label) seen.push(label);
+    });
+    h.session.start("voice");
+    await settle(50);
+    expect(status(h)).toBe("connecting");
+    await settle(100);
+
+    expect(seen).toEqual([
+      "requestingMic",
+      "connecting:minting",
+      "connecting:negotiating",
+      "connected",
+    ]);
+    expect(h.mint).toHaveBeenCalledWith("doc-1", expect.any(AbortSignal));
+    expect(h.transport.lastConnect?.clientSecret).toBe(h.response.clientSecret);
+    expect(h.transport.lastConnect?.micStream).toBe(h.micStreams[0]);
+    expect(h.session.model).toBe("gpt-realtime-2.1-mini");
+    expect(h.session.maxSessionSeconds).toBe(300);
+    expect(h.session.getState().mode).toBe("voice");
+  });
+
+  it("starts in text mode without asking for the mic", async () => {
+    const h = await started("text");
+    expect(h.requestMic).not.toHaveBeenCalled();
+    expect(status(h)).toBe("connected");
+    expect(h.transport.lastConnect?.micStream).toBeNull();
+    expect(h.session.getState().mode).toBe("text");
+  });
+
+  it.each([
+    "denied",
+    "not_found",
+    "in_use",
+    "insecure",
+    "unsupported",
+    "unavailable",
+  ] as const)(
+    "falls back to text mode when the mic fails (%s)",
+    async (reason) => {
+      const h = await started("voice", { mic: reason });
+      const s = h.session.getState();
+      expect(s.connection.status).toBe("connected");
+      expect(s.mode).toBe("text");
+      expect(s.micIssue).toBe(reason);
+      expect(h.transport.lastConnect?.micStream).toBeNull();
+    },
+  );
+
+  it("ignores a second tap while a start is under way", async () => {
+    const h = makeHarness();
+    h.session.start("voice");
+    h.session.start("voice");
+    h.session.start("text");
+    await settle(50);
+    expect(h.requestMic).toHaveBeenCalledOnce();
+    expect(h.transports).toHaveLength(1);
+    h.session.start("voice");
+    expect(h.requestMic).toHaveBeenCalledOnce();
+  });
+
+  it("can start again after the chat ended, with a clean transcript", async () => {
+    const h = await started("text", { script: scenarioScript("text-turn") });
+    h.session.sendText("First?");
+    await settle(1000);
+    expect(h.session.getState().order).toHaveLength(2);
+    h.session.end();
+    expect(status(h)).toBe("ended");
+    expect(h.session.getState().order).toHaveLength(2); // kept on screen
+
+    h.session.start("text");
+    expect(h.session.getState().order).toEqual([]);
+    await settle(50);
+    expect(status(h)).toBe("connected");
+    expect(h.transports).toHaveLength(2);
+    expect(h.transports[0]?.closeCount).toBe(1);
+  });
+
+  it("plays server events into the transcript", async () => {
+    const h = makeHarness({ script: scenarioScript("normal-turn") });
+    h.session.start("voice");
+    await settle(6000);
+    expect(transcript(h.session.getState())).toEqual([
+      ["user", "done", "What was revenue?"],
+      ["assistant", "done", "Revenue grew twelve percent last year."],
+    ]);
+    expect(h.session.getState().activity).toBe("listening");
+  });
+});
+
+describe("failing to start", () => {
+  it.each([
+    [new MintError("voice_disabled"), "voice_disabled"],
+    [new MintError("daily_limit"), "daily_limit"],
+    [new MintError("budget_exhausted"), "budget_exhausted"],
+    [new MintError("rate_limited"), "rate_limited"],
+    [new Error("boom"), "session_connect_failed"],
+  ])(
+    "maps a mint failure (%s) to %s and gives everything back",
+    async (error, code) => {
+      const h = await started("voice", { mintError: error });
+      expect(h.session.getState().connection).toEqual({
+        status: "failed",
+        code,
+      });
+      expect(h.createTransport).not.toHaveBeenCalled();
+      h.expectAllReleased();
+    },
+  );
+
+  it.each([
+    ["busy", "session_upstream_busy"],
+    ["budget", "budget_exhausted"],
+    ["timeout", "session_connect_failed"],
+    ["rejected", "session_connect_failed"],
+    ["network", "session_connect_failed"],
+    ["unsupported", "session_connect_failed"],
+  ] as const)("maps a %s connect failure to %s", async (kind, code) => {
+    const h = await started("voice", { script: { failWith: kind, steps: [] } });
+    expect(h.session.getState().connection).toEqual({ status: "failed", code });
+    h.expectAllReleased();
+  });
+
+  it("keeps the wait from a rate limit in the failed state", async () => {
+    const h = await started("voice", {
+      mintError: new MintError("rate_limited", 42),
+    });
+    expect(h.session.getState().connection).toEqual({
+      status: "failed",
+      code: "rate_limited",
+      retryAfterSeconds: 42,
+    });
+    h.expectAllReleased();
+  });
+
+  it("has no retryAfterSeconds on failures that gave none", async () => {
+    const h = await started("voice", {
+      mintError: new MintError("daily_limit"),
+    });
+    expect(h.session.getState().connection).not.toHaveProperty(
+      "retryAfterSeconds",
+    );
+  });
+
+  it("fails cleanly when no transport can be built", async () => {
+    const h = await started("voice", {
+      transportError: new TransportError("unsupported"),
+    });
+    expect(h.session.getState().connection).toEqual({
+      status: "failed",
+      code: "session_connect_failed",
+    });
+    h.expectAllReleased();
+  });
+
+  it("maps transport errors, treating an abort as 'not a failure'", () => {
+    expect(failureForTransportError(new TransportError("aborted"))).toBeNull();
+    expect(failureForTransportError(new Error("x"))).toBe(
+      "session_connect_failed",
+    );
+  });
+
+  it("can try again after a failure", async () => {
+    const h = await started("voice", {
+      mintError: new MintError("rate_limited"),
+    });
+    expect(status(h)).toBe("failed");
+    h.session.start("voice");
+    expect(status(h)).toBe("requestingMic");
+  });
+});
+
+describe("ending at any point", () => {
+  it("while the mic prompt is open: stops the mic that arrives later, never mints", async () => {
+    const h = makeHarness({ mic: "pending" });
+    h.session.start("voice");
+    await settle(10);
+    h.session.end();
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "user",
+    });
+    const stream = h.resolveMic();
+    await settle(50);
+    expect(stream.tracks[0]?.stop).toHaveBeenCalled();
+    expect(h.mint).not.toHaveBeenCalled();
+    h.expectAllReleased();
+  });
+
+  it("while minting: never opens a transport, releases the mic", async () => {
+    const h = makeHarness({ mintError: "pending" });
+    h.session.start("voice");
+    await settle(10);
+    expect(h.mint).toHaveBeenCalled();
+    h.session.end();
+    h.resolveMint();
+    await settle(50);
+    expect(h.createTransport).not.toHaveBeenCalled();
+    expect(status(h)).toBe("ended");
+    h.expectAllReleased();
+  });
+
+  it("aborts the mint request", async () => {
+    const h = makeHarness({ mintError: "pending" });
+    h.session.start("text");
+    await settle(10);
+    const signal = h.mint.mock.calls[0]?.[1];
+    expect(signal?.aborted).toBe(false);
+    h.session.end();
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("while the transport is being built: closes it as soon as it exists", async () => {
+    const h = makeHarness();
+    h.deps.createTransport = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 500));
+      const t = new MockTransport({ connectDelayMs: 0, steps: [] });
+      h.transports.push(t);
+      return t;
+    });
+    h.session.start("voice");
+    await settle(100);
+    h.session.end();
+    await settle(1000);
+    expect(h.transports).toHaveLength(1);
+    expect(h.transport.closeCount).toBe(1);
+    expect(status(h)).toBe("ended");
+    h.expectAllReleased();
+  });
+
+  it("while connecting: closes the transport, never reaches connected", async () => {
+    const h = makeHarness({ script: { connectDelayMs: 5000, steps: [] } });
+    h.session.start("voice");
+    await settle(100);
+    expect(status(h)).toBe("connecting");
+    h.session.end();
+    await settle(10_000);
+    expect(status(h)).toBe("ended");
+    expect(h.transport.closeCount).toBe(1);
+    h.expectAllReleased();
+  });
+
+  it("while connected: releases tracks, connection, audio, meter and timers", async () => {
+    const h = await started("voice");
+    h.session.subscribeLevel("mic", () => {});
+    expect(h.meters[0]?.running).toBe(true);
+    h.session.end();
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "user",
+    });
+    h.expectAllReleased();
+  });
+
+  it("is harmless when called repeatedly, or before a start", async () => {
+    const idle = makeHarness();
+    idle.session.end();
+    idle.session.detach();
+    expect(idle.session.getState().connection.status).toBe("idle");
+
+    const h = await started("voice");
+    h.session.end();
+    h.session.end();
+    h.session.detach();
+    expect(h.transport.closeCount).toBe(1);
+    h.expectAllReleased();
+  });
+
+  it("detach (unmount) ends a live chat and frees a half-started one", async () => {
+    const live = await started("voice");
+    live.session.detach();
+    expect(live.session.getState().connection.status).toBe("ended");
+    live.expectAllReleased();
+
+    const half = makeHarness({ mic: "pending" });
+    half.session.start("voice");
+    half.session.detach();
+    half.resolveMic();
+    await settle(50);
+    half.expectAllReleased();
+  });
+
+  it("leaks nothing over 20 start/end cycles, ending at different points", async () => {
+    const h = makeHarness({ script: { connectDelayMs: 40, steps: [] } });
+    const endAt = [0, 5, 20, 60, 200];
+    for (let i = 0; i < 20; i++) {
+      h.session.start(i % 2 === 0 ? "voice" : "text");
+      await settle(endAt[i % endAt.length] ?? 0);
+      if (i % 4 === 3) h.session.subscribeLevel("mic", () => {})();
+      h.session.end();
+      await settle(300);
+      expect(["ended", "failed"]).toContain(status(h));
+    }
+    expect(h.deps.createAudioContext).toHaveBeenCalledTimes(20);
+    expect(h.contexts).toHaveLength(20);
+    expect(h.meters).toHaveLength(20);
+    h.expectAllReleased();
+  });
+});
+
+describe("something unexpected inside the start-up", () => {
+  it("fails the chat instead of leaving it stuck on connecting", async () => {
+    const h = makeHarness();
+    // A meter that throws: an error nobody planned for, inside the async run.
+    h.deps.createLevelMeter = vi.fn(
+      () =>
+        ({
+          attach: () => {
+            throw new Error("boom");
+          },
+          subscribe: () => () => {},
+          dispose: () => {},
+          running: false,
+        }) as unknown as LevelMeter,
+    );
+    h.session.start("voice");
+    await settle(100);
+    expect(h.session.getState().connection).toEqual({
+      status: "failed",
+      code: "session_connect_failed",
+    });
+    expect(h.micStreams[0]?.tracks[0]?.readyState).toBe("ended");
+    expect(h.transports).toHaveLength(0);
+  });
+});
+
+describe("the microphone disappears mid-chat", () => {
+  it("carries on as a text chat, with the mic reason and no stuck 'muted'", async () => {
+    const h = await started("voice");
+    h.session.setMuted(true);
+    h.micStreams[0]?.tracks[0]?.end();
+
+    const s = h.session.getState();
+    expect(s.connection.status).toBe("connected");
+    expect(s.mode).toBe("text");
+    expect(s.micIssue).toBe("unavailable");
+    expect(s.muted).toBe(false);
+
+    // Typed questions now ask for text replies, like any text chat.
+    h.transport.sent.length = 0;
+    h.session.sendText("Still there?");
+    expect(h.transport.sent[1]).toMatchObject({
+      type: "response.create",
+      response: { output_modalities: ["text"] },
+    });
+  });
+
+  it("is handled while still connecting", async () => {
+    const h = makeHarness({ script: { connectDelayMs: 500, steps: [] } });
+    h.session.start("voice");
+    await settle(100);
+    expect(h.session.getState().connection.status).toBe("connecting");
+    h.micStreams[0]?.tracks[0]?.end();
+    expect(h.session.getState().mode).toBe("text");
+    await settle(600);
+    expect(h.session.getState().connection.status).toBe("connected");
+  });
+
+  it("stops listening when the chat ends, so a late 'ended' does nothing", async () => {
+    const h = await started("voice");
+    const track = h.micStreams[0]?.tracks[0];
+    expect(track?.listenerCount("ended")).toBe(1);
+    h.session.end();
+    expect(track?.listenerCount("ended")).toBe(0);
+    const before = h.session.getState();
+    track?.end();
+    expect(h.session.getState()).toBe(before);
+  });
+
+  it("ignores it in a chat that was already text-only", async () => {
+    const h = await started("voice", { mic: "denied" });
+    const before = h.session.getState();
+    expect(before.mode).toBe("text");
+    expect(before.micIssue).toBe("denied"); // the original reason is kept
+  });
+});
+
+describe("stop answer", () => {
+  it("cancels, then clears the audio, in that order, and marks the answer interrupted", async () => {
+    const h = await started("voice", { script: scenarioScript("normal-turn") });
+    await settle(1800); // answer is being spoken
+    expect(h.session.getState().activity).toBe("assistantSpeaking");
+    h.transport.sent.length = 0;
+
+    h.session.stopAnswer();
+    expect(sentTypes(h)).toEqual([
+      "response.cancel",
+      "output_audio_buffer.clear",
+    ]);
+    const s = h.session.getState();
+    expect(s.activity).toBe("listening");
+    expect(transcript(s)[1]?.[1]).toBe("interrupted");
+    expect(s.response).toEqual({ activeId: null, audioId: null });
+  });
+
+  it("sends only a cancel in text mode: there is no audio to clear", async () => {
+    const h = await started("text", {
+      script: {
+        steps: [],
+        replyWith: "text",
+        textAnswer: "one two three four five six seven",
+      },
+    });
+    h.session.sendText("Go");
+    await settle(200);
+    h.transport.sent.length = 0;
+    h.session.stopAnswer();
+    expect(sentTypes(h)).toEqual(["response.cancel"]);
+    await settle(1000);
+    const s = h.session.getState();
+    expect(s.notice).toBeNull();
+    expect(transcript(s)[1]?.[1]).toBe("interrupted");
+    expect(s.activity).toBe("listening");
+  });
+
+  it("does nothing when nothing is being answered, or when not connected", async () => {
+    const h = await started("voice");
+    h.transport.sent.length = 0;
+    h.session.stopAnswer();
+    expect(h.transport.sent).toEqual([]);
+
+    const idle = makeHarness();
+    idle.session.stopAnswer();
+    expect(idle.session.getState().activity).toBe("listening");
+  });
+
+  it("does not show an error for the cancel the server could not use", async () => {
+    const h = await started("voice");
+    // thinking, but the server has no response yet: it will reject the cancel
+    h.transport.push(ev.speechStarted("u1"));
+    h.transport.push(ev.speechStopped("u1"));
+    expect(h.session.getState().activity).toBe("thinking");
+    h.session.stopAnswer();
+    await settle(100);
+    expect(h.session.getState().notice).toBeNull();
+    expect(h.session.getState().connection.status).toBe("connected");
+  });
+});
+
+describe("mute", () => {
+  it("flips track.enabled without renegotiating or sending anything", async () => {
+    const h = await started("voice");
+    const track = h.micStreams[0]?.tracks[0];
+    h.transport.sent.length = 0;
+
+    h.session.setMuted(true);
+    expect(track?.enabled).toBe(false);
+    expect(h.session.getState().muted).toBe(true);
+    h.session.setMuted(false);
+    expect(track?.enabled).toBe(true);
+    expect(h.session.getState().muted).toBe(false);
+    expect(h.transport.sent).toEqual([]);
+    expect(h.createTransport).toHaveBeenCalledOnce();
+    expect(track?.stop).not.toHaveBeenCalled();
+  });
+
+  it("does nothing in text mode, where there is no mic", async () => {
+    const h = await started("text");
+    h.session.setMuted(true);
+    expect(h.session.getState().muted).toBe(false);
+  });
+});
+
+describe("typed messages", () => {
+  const ANSWER = "Revenue grew twelve percent last year.";
+
+  it("sends the item and then asks for a text-only reply in text mode", async () => {
+    const h = await started("text", { script: scenarioScript("text-turn") });
+    h.session.sendText("  What was revenue?  ");
+    expect(sentTypes(h)).toEqual([
+      "conversation.item.create",
+      "response.create",
+    ]);
+    const [create, respond] = h.transport.sent;
+    expect(create).toMatchObject({
+      item: {
+        role: "user",
+        content: [{ type: "input_text", text: "What was revenue?" }],
+      },
+    });
+    expect(respond).toMatchObject({
+      response: { output_modalities: ["text"] },
+    });
+    // The bubble is there before the server says anything.
+    expect(transcript(h.session.getState())).toEqual([
+      ["user", "sending", "What was revenue?"],
+    ]);
+
+    await settle(1500);
+    expect(transcript(h.session.getState())).toEqual([
+      ["user", "done", "What was revenue?"],
+      ["assistant", "done", ANSWER],
+    ]);
+    expect(h.session.getState().activity).toBe("listening");
+    expect(h.session.getState().usage.responses).toBe(1);
+  });
+
+  it("asks for the default (spoken) reply when typed during a voice chat", async () => {
+    const h = await started("voice", {
+      script: { steps: [], replyWith: "audio" },
+    });
+    h.session.sendText("Hello");
+    expect(h.transport.sent[1]).toEqual(
+      expect.objectContaining({ type: "response.create" }),
+    );
+    expect(
+      (h.transport.sent[1] as { response?: unknown }).response,
+    ).toBeUndefined();
+  });
+
+  it("ignores blank text and anything while not connected", async () => {
+    const h = await started("text");
+    h.session.sendText("   ");
+    expect(h.transport.sent).toEqual([]);
+    const idle = makeHarness();
+    idle.session.sendText("hi");
+    expect(idle.session.getState().order).toEqual([]);
+  });
+
+  it("replaces an answer in progress: cancel first, then the new question", async () => {
+    const h = await started("text", {
+      script: {
+        steps: [],
+        replyWith: "text",
+        textAnswer: "one two three four five six seven eight",
+      },
+    });
+    h.session.sendText("First");
+    await settle(200);
+    h.transport.sent.length = 0;
+
+    h.session.sendText("Second");
+    expect(sentTypes(h)).toEqual([
+      "response.cancel",
+      "conversation.item.create",
+      "response.create",
+    ]);
+    await settle(3000);
+    const rows = transcript(h.session.getState());
+    expect(rows[0]).toEqual(["user", "done", "First"]);
+    expect(rows[1]?.[1]).toBe("interrupted");
+    expect(rows.at(-2)).toEqual(["user", "done", "Second"]);
+    expect(rows.at(-1)?.[1]).toBe("done");
+  });
+
+  it("marks the bubble 'not sent' when the channel cannot take it, and retries it", async () => {
+    const h2 = await started("text", { script: scenarioScript("text-turn") });
+    const send = vi.spyOn(h2.transport, "send").mockReturnValueOnce(false);
+    h2.session.sendText("Will fail");
+    expect(transcript(h2.session.getState())).toEqual([
+      ["user", "sendFailed", "Will fail"],
+    ]);
+    expect(h2.session.getState().activity).toBe("listening");
+    send.mockRestore();
+
+    const failedId = h2.session.getState().order[0] ?? "";
+    h2.session.retryText(failedId);
+    await settle(1500);
+    expect(transcript(h2.session.getState()).map((r) => r[2])).toEqual([
+      "Will fail",
+      ANSWER,
+    ]);
+    // Only a failed bubble can be retried.
+    const doneId = h2.session.getState().order[0] ?? "";
+    h2.transport.sent.length = 0;
+    h2.session.retryText(doneId);
+    h2.session.retryText("nope");
+    expect(h2.transport.sent).toEqual([]);
+  });
+
+  it("marks the bubble 'not sent' when the server rejects it", async () => {
+    const h = await started("text");
+    h.session.sendText("Bad one");
+    const create = h.transport.sent[0];
+    h.transport.push(ev.error("invalid_value", create?.event_id));
+    expect(transcript(h.session.getState())).toEqual([
+      ["user", "sendFailed", "Bad one"],
+    ]);
+    expect(h.session.getState().connection.status).toBe("connected");
+  });
+});
+
+describe("limits and timers", () => {
+  it("warns a minute before the cap, then ends the chat with the max-duration reason", async () => {
+    const h = await started("voice", { session: { maxSessionSeconds: 180 } });
+    // Keep it from idling out.
+    const ping = () => h.transport.push(ev.speechStarted("u"));
+    await settle(CAP_WARNING_MS * 2 - 1000);
+    expect(h.session.getState().notice).toBeNull();
+    ping();
+    await settle(1000);
+    expect(h.session.getState().notice).toEqual({
+      kind: "cap_warning",
+      secondsLeft: 60,
+    });
+    expect(status(h)).toBe("connected");
+
+    ping();
+    await settle(CAP_WARNING_MS);
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "max_duration",
+    });
+    h.expectAllReleased();
+  });
+
+  it("skips the warning when the whole chat is a minute or less", async () => {
+    const h = await started("voice", { session: { maxSessionSeconds: 45 } });
+    await settle(44_000);
+    expect(h.session.getState().notice).toBeNull();
+    await settle(2_000);
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "max_duration",
+    });
+  });
+
+  it("ends a silent chat after 2 minutes", async () => {
+    const h = await started("voice", { session: { maxSessionSeconds: 1800 } });
+    await settle(IDLE_MS - 1000);
+    expect(status(h)).toBe("connected");
+    await settle(2000);
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "idle",
+    });
+    h.expectAllReleased();
+  });
+
+  it("restarts the idle clock on speech", async () => {
+    const h = await started("voice", { session: { maxSessionSeconds: 1800 } });
+    await settle(IDLE_MS - 10_000);
+    h.transport.push(ev.speechStarted("u1"));
+    h.transport.push(ev.speechStopped("u1"));
+    await settle(IDLE_MS - 10_000);
+    expect(status(h)).toBe("connected");
+    await settle(20_000);
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "idle",
+    });
+  });
+
+  it("never idles out in the middle of an answer", async () => {
+    const h = await started("voice", { session: { maxSessionSeconds: 1800 } });
+    h.transport.push(ev.responseCreated("r1"));
+    h.transport.push(ev.audioStarted("r1"));
+    await settle(IDLE_MS * 2);
+    expect(status(h)).toBe("connected");
+    h.transport.push(ev.audioStopped("r1"));
+    h.transport.push(ev.responseDone("r1"));
+    await settle(IDLE_MS + 1000);
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "idle",
+    });
+  });
+
+  it("ends a chat that stays in the background for a minute", async () => {
+    const h = await started("voice", { session: { maxSessionSeconds: 1800 } });
+    h.setHidden(true);
+    await settle(HIDDEN_MS - 1000);
+    expect(status(h)).toBe("connected");
+    await settle(2000);
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "hidden",
+    });
+    h.expectAllReleased();
+  });
+
+  it("keeps the chat if the user comes back in time", async () => {
+    const h = await started("voice", { session: { maxSessionSeconds: 1800 } });
+    h.setHidden(true);
+    await settle(HIDDEN_MS - 5000);
+    h.setHidden(false);
+    await settle(HIDDEN_MS);
+    expect(status(h)).toBe("connected");
+  });
+
+  describe("when the browser froze the timers in a background tab", () => {
+    // vi.setSystemTime moves the clock without running any timer, which is
+    // what a suspended tab looks like from the page when it comes back.
+    const jump = (ms: number) => vi.setSystemTime(Date.now() + ms);
+
+    it("ends the chat on return if it was hidden for longer than a minute", async () => {
+      const h = await started("voice", {
+        session: { maxSessionSeconds: 1800 },
+      });
+      h.setHidden(true);
+      jump(10 * 60_000);
+      expect(status(h)).toBe("connected"); // the timer never fired
+      h.setHidden(false);
+      expect(h.session.getState().connection).toEqual({
+        status: "ended",
+        reason: "hidden",
+      });
+      h.expectAllReleased();
+    });
+
+    it("keeps the chat if the tab was hidden for less than a minute", async () => {
+      const h = await started("voice", {
+        session: { maxSessionSeconds: 1800 },
+      });
+      h.setHidden(true);
+      jump(HIDDEN_MS - 5000);
+      h.setHidden(false);
+      expect(status(h)).toBe("connected");
+      // The hidden timer was cancelled: it must not fire a minute later.
+      await settle(HIDDEN_MS + 1000);
+      expect(status(h)).toBe("connected");
+    });
+
+    it("does not count an earlier, shorter hide towards a later one", async () => {
+      const h = await started("voice", {
+        session: { maxSessionSeconds: 1800 },
+      });
+      h.setHidden(true);
+      jump(20_000);
+      h.setHidden(false);
+      // 90 s of visible time is more than the hidden limit but under the
+      // idle limit: visible time must not count as hidden time.
+      jump(90_000);
+      h.setHidden(false);
+      expect(status(h)).toBe("connected");
+    });
+
+    it("ends the chat at the cap even though its timer was frozen", async () => {
+      const h = await started("voice", { session: { maxSessionSeconds: 180 } });
+      jump(200_000);
+      expect(status(h)).toBe("connected");
+      h.setHidden(false); // e.g. the page came back to the foreground
+      expect(h.session.getState().connection).toEqual({
+        status: "ended",
+        reason: "max_duration",
+      });
+    });
+
+    it("ends a silent chat whose idle timer was frozen", async () => {
+      const h = await started("voice", {
+        session: { maxSessionSeconds: 1800 },
+      });
+      jump(IDLE_MS + 5000);
+      h.setHidden(false);
+      expect(h.session.getState().connection).toEqual({
+        status: "ended",
+        reason: "idle",
+      });
+    });
+
+    it("does not end a chat that is in the middle of an answer", async () => {
+      const h = await started("voice", {
+        session: { maxSessionSeconds: 1800 },
+      });
+      h.transport.push(ev.responseCreated("r1"));
+      h.transport.push(ev.audioStarted("r1"));
+      jump(IDLE_MS + 5000);
+      h.setHidden(false);
+      expect(status(h)).toBe("connected");
+    });
+
+    it("measures a hide that began before the chat connected", async () => {
+      const h = makeHarness({ session: { maxSessionSeconds: 1800 } });
+      h.setHidden(true);
+      h.session.start("voice");
+      await settle(50);
+      jump(HIDDEN_MS + 1000);
+      h.setHidden(false);
+      expect(h.session.getState().connection).toEqual({
+        status: "ended",
+        reason: "hidden",
+      });
+    });
+  });
+
+  it("counts a tab that was already hidden when the chat connected", async () => {
+    const h = makeHarness({ session: { maxSessionSeconds: 1800 } });
+    h.setHidden(true);
+    h.session.start("voice");
+    await settle(HIDDEN_MS + 1000);
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "hidden",
+    });
+  });
+});
+
+describe("a flaky link", () => {
+  it("shows reconnecting, and recovers if the link comes back inside the grace period", async () => {
+    const h = await started("voice");
+    h.transport.emitState("disconnected");
+    expect(status(h)).toBe("reconnecting");
+    await settle(RECONNECT_GRACE_MS - 1000);
+    h.transport.emitState("connected");
+    expect(status(h)).toBe("connected");
+    await settle(RECONNECT_GRACE_MS * 2);
+    expect(status(h)).toBe("connected");
+  });
+
+  it("gives up when the link stays down", async () => {
+    const h = await started("voice");
+    await settle(2000);
+    h.transport.emitState("disconnected");
+    await settle(RECONNECT_GRACE_MS + 100);
+    expect(h.session.getState().connection).toEqual({
+      status: "failed",
+      code: "session_reconnect_failed",
+    });
+    h.expectAllReleased();
+  });
+
+  it("fails at once when the link dies outright", async () => {
+    const h = await started("voice");
+    h.transport.emitState("failed");
+    expect(h.session.getState().connection).toEqual({
+      status: "failed",
+      code: "session_reconnect_failed",
+    });
+    h.expectAllReleased();
+  });
+
+  it("keeps the transcript on screen after the link fails", async () => {
+    const h = await started("voice", { script: scenarioScript("normal-turn") });
+    await settle(3000);
+    h.transport.emitState("failed");
+    expect(h.session.getState().order).toHaveLength(2);
+  });
+});
+
+describe("what comes in from the server", () => {
+  it("treats a billing error as fatal and tears everything down", async () => {
+    const h = await started("voice", { script: scenarioScript("budget") });
+    await settle(1500);
+    expect(h.session.getState().connection).toEqual({
+      status: "failed",
+      code: "budget_exhausted",
+    });
+    h.expectAllReleased();
+  });
+
+  it("survives a recoverable error and keeps going", async () => {
+    const h = await started("voice", { script: scenarioScript("error") });
+    await settle(6000);
+    const s = h.session.getState();
+    expect(s.notice).toEqual({ kind: "error", code: "invalid_value" });
+    expect(s.connection.status).toBe("connected");
+    expect(transcript(s)).toHaveLength(2);
+  });
+
+  it("counts unknown and malformed events, logging them only when debugging", async () => {
+    const quiet = await started("voice", {
+      script: scenarioScript("unknown-event"),
+    });
+    const spy = vi.spyOn(console, "debug").mockImplementation(() => {});
+    await settle(3000);
+    expect(quiet.session.getState().diagnostics.unknown).toBe(1);
+    expect(spy).not.toHaveBeenCalled();
+
+    const loud = await started("voice", {
+      script: scenarioScript("unknown-event"),
+      debug: true,
+    });
+    await settle(3000);
+    expect(loud.session.getState().diagnostics).toMatchObject({
+      unknown: 1,
+      malformed: 2,
+    });
+    expect(spy).toHaveBeenCalledTimes(3);
+    spy.mockRestore();
+  });
+
+  it("ignores events it knows and does not need", async () => {
+    const h = await started("voice");
+    h.transport.push({ type: "rate_limits.updated", rate_limits: [] });
+    h.transport.push({ type: "conversation.created" });
+    expect(h.session.getState().diagnostics.unknown).toBe(0);
+  });
+});
+
+describe("level meters", () => {
+  it("feeds subscribers, keeps them across restarts and zeroes the bars at the end", async () => {
+    const h = makeHarness();
+    const got: number[] = [];
+    const off = h.session.subscribeLevel("mic", (l) => got.push(l));
+    expect(h.meters).toHaveLength(0); // nothing to meter before a chat
+
+    h.session.start("voice");
+    await settle(50);
+    expect(h.meters[0]?.running).toBe(true);
+    h.contexts[0]!.analysers[0]!.samples = [64, 192];
+    h.frames.step();
+    expect(got.at(-1)).toBe(1);
+
+    h.session.end();
+    expect(got.at(-1)).toBe(0);
+    expect(h.meters[0]?.running).toBe(false);
+
+    h.session.start("voice");
+    await settle(50);
+    expect(h.meters[1]?.running).toBe(true);
+    off();
+    expect(h.meters[1]?.running).toBe(false);
+  });
+
+  it("only polls the audio while somebody is listening", async () => {
+    const h = await started("voice");
+    expect(h.meters[0]?.running).toBe(false);
+    const off = h.session.subscribeLevel("remote", () => {});
+    expect(h.meters[0]?.running).toBe(false); // no remote stream attached yet
+    off();
+  });
+
+  it("attaches the model's voice when the transport reports it", async () => {
+    const h = await started("voice");
+    const got: number[] = [];
+    h.session.subscribeLevel("remote", (l) => got.push(l));
+    // Mock transports have no remote audio; attach one through the meter directly.
+    h.meters[0]?.attach("remote", h.micStreams[0] as never);
+    h.contexts[0]!.analysers.at(-1)!.samples = [64, 192];
+    h.frames.step();
+    expect(got.at(-1)).toBe(1);
+  });
+});
+
+describe("the dev event recorder", () => {
+  it("records what came in, what went out and the key moments, fresh per chat", async () => {
+    const h = makeHarness({
+      recorder: true,
+      script: scenarioScript("text-turn"),
+    });
+    h.session.start("text");
+    await settle(50);
+    h.session.sendText("Hi");
+    await settle(1500);
+
+    const lines = h.recorders[0]!.toJsonl()
+      .trimEnd()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines[0]).toMatchObject({
+      dir: "meta",
+      data: { event: "start", mode: "text" },
+    });
+    expect(
+      lines.some((l) => l.dir === "meta" && l.data.event === "minted"),
+    ).toBe(true);
+    expect(
+      lines.filter((l) => l.dir === "out").map((l) => l.data.type),
+    ).toEqual(["conversation.item.create", "response.create"]);
+    expect(
+      lines.some((l) => l.dir === "in" && l.data.type === "session.created"),
+    ).toBe(true);
+    expect(JSON.stringify(lines)).not.toContain(h.response.clientSecret);
+
+    h.session.end();
+    expect(h.session.recorder).toBe(h.recorders[0]); // still there to download
+    h.session.start("text");
+    expect(h.recorders).toHaveLength(2);
+  });
+
+  it("records nothing and creates nothing when dev tools are off", async () => {
+    const h = await started("text");
+    expect(h.session.recorder).toBeNull();
+  });
+
+  it("notes why the mic failed", async () => {
+    const h = makeHarness({ recorder: true, mic: "denied" });
+    h.session.start("voice");
+    await settle(50);
+    expect(h.recorders[0]?.toJsonl()).toContain('"reason":"denied"');
+  });
+});
+
+describe("subscriptions", () => {
+  it("notifies once per change and stops after unsubscribe", async () => {
+    const h = makeHarness();
+    const listener = vi.fn();
+    const off = h.session.subscribe(listener);
+    h.session.start("text");
+    await settle(50);
+    expect(listener).toHaveBeenCalled();
+    const calls = listener.mock.calls.length;
+    off();
+    h.session.end();
+    expect(listener).toHaveBeenCalledTimes(calls);
+  });
+
+  it("returns the same state object while nothing changes", async () => {
+    const h = await started("text");
+    const a = h.session.getState();
+    h.session.setMuted(false);
+    h.session.stopAnswer();
+    expect(h.session.getState()).toBe(a);
+  });
+});
