@@ -13,6 +13,10 @@ describe("security headers", () => {
     expect(csp).toContain("object-src 'none'");
   });
 
+  it("allows YouTube thumbnails and no other remote images", () => {
+    expect(csp).toContain("img-src 'self' data: blob: https://i.ytimg.com;");
+  });
+
   it("only allows unsafe-eval and websockets in dev", () => {
     expect(csp).not.toContain("unsafe-eval");
     expect(csp).not.toMatch(/\bwss?:/);

@@ -1,7 +1,7 @@
 // Wire codes, HTTP statuses and user-facing copy. Copy comes from docs/SPEC.md
 // section 4; it is always this text, never an upstream message. Shared by the
 // server (to build errors) and the client (to render them). Entries are added
-// per milestone: PDF and upload errors here, YouTube in M3.
+// per milestone: PDF and upload errors, then YouTube (M3).
 
 export const ERROR_CATALOG = {
   invalid_request: {
@@ -60,6 +60,50 @@ export const ERROR_CATALOG = {
   upload_missing: {
     status: 404,
     message: "We couldn't find your upload. Upload it again.",
+  },
+  youtube_bad_url: {
+    status: 400,
+    message: "That doesn't look like a YouTube video link.",
+  },
+  youtube_no_video_id: {
+    status: 400,
+    message: "That link is a playlist or channel. Paste a link to one video.",
+  },
+  youtube_no_transcript: {
+    status: 422,
+    message:
+      "This video has no captions, so there's nothing to read. Try another video.",
+  },
+  youtube_unavailable: {
+    status: 404,
+    message:
+      "This video is unavailable. It may be private, removed or blocked in some regions.",
+  },
+  youtube_age_restricted: {
+    status: 422,
+    message:
+      "This video is age-restricted, so its captions can't be read. Try another video.",
+  },
+  youtube_live: {
+    status: 422,
+    message: "Live streams aren't supported. Try again after the stream ends.",
+  },
+  youtube_too_long: {
+    status: 422,
+    message: "This transcript is too long to load. Try a shorter video.",
+  },
+  youtube_blocked: {
+    status: 503,
+    message: "YouTube is blocking our server right now. Try again in a minute.",
+  },
+  youtube_quota: {
+    status: 503,
+    message:
+      "We've used up our YouTube lookups for now. Try a PDF, or try again later.",
+  },
+  youtube_failed: {
+    status: 502,
+    message: "We couldn't load this video's captions. Try again.",
   },
 } as const satisfies Record<string, { status: number; message: string }>;
 
