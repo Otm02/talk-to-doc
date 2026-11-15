@@ -198,7 +198,11 @@ function standardEncryption(userPassword: string, ownerPassword: string) {
 
 // --- Documents ---------------------------------------------------------------
 
-type PageSpec = { lines: string[] } | { image: true } | { blank: true };
+type PageSpec =
+  | { lines: string[] }
+  | { unicodeLines: string[]; rtl?: boolean }
+  | { image: true }
+  | { blank: true };
 
 interface DocumentSpec {
   pages: PageSpec[];
@@ -210,6 +214,47 @@ interface DocumentSpec {
 function textContent(lines: string[]): Uint8Array {
   const body = lines.map((l) => `${literal(l)} Tj T*`).join("\n");
   return enc.encode(`BT\n/F1 12 Tf\n72 720 Td\n16 TL\n${body}\nET\n`);
+}
+
+/**
+ * Text in a script WinAnsi cannot hold. The font is a Type0 font with 2-byte
+ * codes and a ToUnicode map and no embedded glyphs: pdf.js reads the text
+ * through the map and never needs to draw it, so the file stays small and
+ * reproducible, and extraction is the same path real files take. Every
+ * character here is in the Basic Multilingual Plane, so one code unit each.
+ */
+function unicodeFont(lines: string[], rtl: boolean) {
+  const codes = new Map<string, number>();
+  for (const ch of lines.join("")) {
+    if (!codes.has(ch)) codes.set(ch, codes.size + 1);
+  }
+  const code = (ch: string) => codes.get(ch) ?? 0;
+  const hex4 = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
+  const entries = [...codes].map(
+    ([ch, c]) => `<${hex4(c)}> <${hex4(ch.codePointAt(0) ?? 0x3f)}>`,
+  );
+  const toUnicode =
+    "/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n" +
+    "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n" +
+    "/CMapName /Adobe-Identity-UCS def /CMapType 2 def\n" +
+    "1 begincodespacerange <0000> <FFFF> endcodespacerange\n" +
+    `${entries.length} beginbfchar\n${entries.join("\n")}\nendbfchar\n` +
+    "endcmap CMapName currentdict /CMap defineresource pop end end\n";
+  // A PDF stores a right-to-left line in visual order, left to right as it is
+  // drawn; pdf.js turns it back into logical order when it reads it.
+  const shown = (l: string) => (rtl ? [...l].reverse() : [...l]);
+  const content = (ls: string[]) =>
+    enc.encode(
+      `BT\n/F2 14 Tf\n72 720 Td\n20 TL\n${ls
+        .map(
+          (l) =>
+            `<${shown(l)
+              .map((ch) => hex4(code(ch)))
+              .join("")}> Tj T*`,
+        )
+        .join("\n")}\nET\n`,
+    );
+  return { toUnicode: enc.encode(toUnicode), content };
 }
 
 function buildDocument(spec: DocumentSpec): Uint8Array<ArrayBuffer> {
@@ -232,7 +277,30 @@ function buildDocument(spec: DocumentSpec): Uint8Array<ArrayBuffer> {
       })
     : undefined;
 
-  const resources = `<< /Font << /F1 ${font} 0 R >>${image ? ` /XObject << /Im1 ${image} 0 R >>` : ""} >>`;
+  const allUnicode = spec.pages.flatMap((p) =>
+    "unicodeLines" in p ? p.unicodeLines : [],
+  );
+  const rtl = spec.pages.some((p) => "unicodeLines" in p && p.rtl);
+  const uni = allUnicode.length > 0 ? unicodeFont(allUnicode, rtl) : undefined;
+  let uniFont: number | undefined;
+  if (uni) {
+    const map = w.add({ kind: "stream", dict: "", data: uni.toUnicode });
+    const descendant = w.add({
+      kind: "plain",
+      body:
+        "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /FixtureSans " +
+        "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> " +
+        "/DW 600 >>",
+    });
+    uniFont = w.add({
+      kind: "plain",
+      body:
+        "<< /Type /Font /Subtype /Type0 /BaseFont /FixtureSans " +
+        `/Encoding /Identity-H /DescendantFonts [${descendant} 0 R] /ToUnicode ${map} 0 R >>`,
+    });
+  }
+
+  const resources = `<< /Font << /F1 ${font} 0 R${uniFont ? ` /F2 ${uniFont} 0 R` : ""} >>${image ? ` /XObject << /Im1 ${image} 0 R >>` : ""} >>`;
   const kids: number[] = [];
   for (const page of spec.pages) {
     const pageNum = w.reserve();
@@ -243,6 +311,13 @@ function buildDocument(spec: DocumentSpec): Uint8Array<ArrayBuffer> {
         kind: "stream",
         dict: "",
         data: textContent(page.lines),
+      });
+      contents = ` /Contents ${stream} 0 R`;
+    } else if ("unicodeLines" in page && uni) {
+      const stream = w.add({
+        kind: "stream",
+        dict: "",
+        data: uni.content(page.unicodeLines),
       });
       contents = ` /Contents ${stream} 0 R`;
     } else if ("image" in page) {
@@ -401,6 +476,27 @@ const INJECTION_PAGES: string[][] = [
   ],
 ];
 
+// One short paragraph per script. Arabic and Devanagari are the hard cases:
+// right-to-left order and letters that combine, so a careless "clean up"
+// (ASCII folding, NFKD) would damage them. Kept in logical order, as typed.
+export const UNICODE_LINES: Record<string, string[]> = {
+  cyrillic: [
+    "Годовой отчёт",
+    "Выручка выросла на двенадцать процентов",
+    "по сравнению с прошлым годом.",
+  ],
+  cjk: [
+    "年度报告",
+    "与去年相比，收入增长了百分之十二。",
+    "日本語の文章もここにあります。",
+  ],
+  arabic: ["التقرير السنوي", "ارتفعت الإيرادات بنسبة اثني عشر في المائة."],
+  devanagari: [
+    "वार्षिक रिपोर्ट",
+    "पिछले वर्ष की तुलना में राजस्व में बारह प्रतिशत की वृद्धि हुई।",
+  ],
+};
+
 export function buildFixtures(): Map<string, Uint8Array<ArrayBuffer>> {
   return new Map<string, Uint8Array<ArrayBuffer>>([
     [
@@ -448,6 +544,14 @@ export function buildFixtures(): Map<string, Uint8Array<ArrayBuffer>> {
       }),
     ],
     ["french.pdf", buildDocument({ pages: [{ lines: FRENCH_LINES }] })],
+    ...Object.entries(UNICODE_LINES).map(
+      ([script, unicodeLines]): [string, Uint8Array<ArrayBuffer>] => [
+        `${script}.pdf`,
+        buildDocument({
+          pages: [{ unicodeLines, rtl: script === "arabic" }],
+        }),
+      ],
+    ),
     ["hyphenation.pdf", buildDocument({ pages: [{ lines: HYPHEN_LINES }] })],
     ["empty.pdf", buildZeroPages()],
   ]);

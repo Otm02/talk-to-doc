@@ -6,6 +6,8 @@ const viewport = { width: 390, height: 844 };
 export default defineConfig({
   testDir: "./e2e",
   forbidOnly: !!process.env.CI,
+  // The real-API test (e2e/live.spec.ts) is run by hand: pnpm test:live.
+  grepInvert: /@live/,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: { baseURL: `http://localhost:${PORT}`, trace: "retain-on-failure" },

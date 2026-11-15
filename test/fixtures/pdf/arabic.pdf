@@ -1,0 +1,82 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [7 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding << /Type /Encoding /BaseEncoding /WinAnsiEncoding /Differences [1 /fi /fl /ff /ffi /ffl] >> >>
+endobj
+4 0 obj
+<<  /Length 619 >>
+stream
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identity-UCS def /CMapType 2 def
+1 begincodespacerange <0000> <FFFF> endcodespacerange
+21 beginbfchar
+<0001> <0627>
+<0002> <0644>
+<0003> <062A>
+<0004> <0642>
+<0005> <0631>
+<0006> <064A>
+<0007> <0020>
+<0008> <0633>
+<0009> <0646>
+<000A> <0648>
+<000B> <0641>
+<000C> <0639>
+<000D> <0625>
+<000E> <062F>
+<000F> <0628>
+<0010> <0629>
+<0011> <062B>
+<0012> <0634>
+<0013> <0645>
+<0014> <0626>
+<0015> <002E>
+endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /CIDFontType2 /BaseFont /FixtureSans /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /DW 600 >>
+endobj
+6 0 obj
+<< /Type /Font /Subtype /Type0 /BaseFont /FixtureSans /Encoding /Identity-H /DescendantFonts [5 0 R] /ToUnicode 4 0 R >>
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 6 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<<  /Length 274 >>
+stream
+BT
+/F2 14 Tf
+72 720 Td
+20 TL
+<0006000A000900080002000100070005000600050004000300020001> Tj T*
+<001500100014000100130002000100070006000B000700050012000C0007000600090011000100070010000F00080009000F000700030001000E000100050006000D0002000100070003000C000B000300050001> Tj T*
+ET
+
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000287 00000 n 
+0000000958 00000 n 
+0000001119 00000 n 
+0000001255 00000 n 
+0000001391 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+1717
+%%EOF

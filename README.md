@@ -18,18 +18,19 @@ Open http://localhost:3000 (best at 390x844). `GET /api/health` shows the versio
 
 ## Scripts
 
-| Script                         | Does                                        |
-| ------------------------------ | ------------------------------------------- |
-| `pnpm dev` / `build` / `start` | Next.js                                     |
-| `pnpm check`                   | lint + typecheck + unit tests               |
-| `pnpm test`                    | Vitest                                      |
-| `pnpm test:e2e`                | Playwright at 390x844 (Chromium and WebKit) |
-| `pnpm format`                  | Prettier                                    |
-| `pnpm fixtures`                | Regenerate the test PDFs in `test/fixtures` |
-| `pnpm icons`                   | Redraw the app icons (uses Playwright)      |
-| `pnpm smoke <url>`             | Deploy smoke test (see below)               |
+| Script                         | Does                                                            |
+| ------------------------------ | --------------------------------------------------------------- |
+| `pnpm dev` / `build` / `start` | Next.js                                                         |
+| `pnpm check`                   | lint + typecheck + unit tests with the coverage gates           |
+| `pnpm test`                    | Vitest                                                          |
+| `pnpm test:e2e`                | Playwright at 390x844 (Chromium and WebKit), mock transport     |
+| `pnpm test:live`               | The one test that calls the real API (see Testing). Never in CI |
+| `pnpm format`                  | Prettier                                                        |
+| `pnpm fixtures`                | Regenerate the test PDFs in `test/fixtures`                     |
+| `pnpm icons`                   | Redraw the app icons (uses Playwright)                          |
+| `pnpm smoke <url>`             | Deploy smoke test (see below)                                   |
 
-Tests and CI never call the live OpenAI API, YouTube or Supadata. The YouTube tests serve responses recorded once by `scripts/record-youtube-fixtures.ts` (see `test/fixtures/README.md`).
+Tests and CI never call the live OpenAI API, YouTube or Supadata (the one exception, `pnpm test:live`, is run by hand; see Testing). The YouTube tests serve responses recorded once by `scripts/record-youtube-fixtures.ts` (see `test/fixtures/README.md`).
 
 ### Try the PDF endpoint locally
 
@@ -50,6 +51,16 @@ curl -N -X POST localhost:3000/api/ingest/youtube \
 ```
 
 The first line is the meta (title, channel, language, whether the captions are auto-generated, and which provider served them), then one line per ~30 second paragraph, then `done`. Every URL shape works (watch, `youtu.be`, Shorts, embed, live, `m.`, `music.`, `youtube-nocookie`) and so does a bare 11-character id. A video without captions, a private one, a live stream or a playlist link comes back as JSON with an HTTP status and short copy.
+
+## Testing
+
+**Unit tests** (`pnpm test`, Vitest) run with coverage in `pnpm check`. Three gates fail the run: 80% for the whole app, and 90% for `src/server/**` and for the realtime core in `src/features/voice/realtime/**` (lines, statements, functions and branches each). Only framework glue is left out of the count: the Next `layout.tsx` and `page.tsx`, and the generated shadcn primitives in `src/components/ui`. CI prints the numbers per area in the job summary.
+
+**End to end** (`pnpm test:e2e`, Playwright) walks the review script at 390x844 on Chromium and WebKit, against the mock transport, with the PDF route real and the YouTube route mocked. `docs/SPEC.md` section 2.6 lists every scenario and its test, and `scripts/spec-proofs.test.ts` fails if a file named anywhere in the SPEC is missing. Browsers come from `pnpm exec playwright install --with-deps chromium webkit`.
+
+**CI** (`.github/workflows/ci.yml`) pins `runs-on: ubuntu-24.04`: `ubuntu-latest` moved to Ubuntu 26, where `playwright install --with-deps` fails. Jobs: a secret scan, `check` (lint, `next typegen` then `tsc`, unit tests with coverage, build, bundle scan) and `e2e` once per browser, with the Playwright browsers cached and the HTML report uploaded when a run fails. WebKit runs in CI as its own job, `e2e (webkit)`. This has not been seen passing on a GitHub runner yet; if its system packages fail to install there, remove `webkit` from the matrix and treat WebKit as local-only (`pnpm exec playwright test --project=webkit`).
+
+**The live test** (`e2e/live.spec.ts`, tagged `@live`) is the only test that reaches OpenAI. Chromium plays `tests/fixtures/question.wav` into a fake microphone, the real app starts a real chat, and the test asserts that an assistant transcript appears; it then ends the chat. It refuses to run on anything but `gpt-realtime-2.1-mini` (it reads `REALTIME_MODEL`, default mini), checks the model the server actually minted, and has no retries. It needs `OPENAI_API_KEY` in the environment the server reads and a recorded `question.wav` (16 kHz mono PCM is what the repo's file uses). Run it by hand with `pnpm test:live`: a few cents each time, twice at most. `pnpm test:e2e` excludes it and it skips itself when `CI` is set. It builds the app with the real transport into `.next`, so the next `pnpm test:e2e` rebuilds.
 
 ## YouTube on the deployed app
 
