@@ -1,5 +1,6 @@
 "use client";
 
+import { cn } from "@/lib/utils";
 import { formatUsd, type CostEstimate } from "../realtime/cost";
 import { PRICES_FETCHED } from "../realtime/prices";
 import { useDebug } from "./use-debug";
@@ -13,10 +14,13 @@ export function CostOverlay({
   cost,
   model,
   responses,
+  className,
 }: {
   cost: CostEstimate | null;
   model: string | null;
   responses: number;
+  /** Lets a screen place it in its own layout instead of floating over it. */
+  className?: string;
 }) {
   const debug = useDebug();
   if (!debug) return null;
@@ -24,7 +28,10 @@ export function CostOverlay({
   return (
     <details
       data-testid="cost-overlay"
-      className="fixed top-[max(0.5rem,env(safe-area-inset-top))] right-2 z-50 max-w-[calc(100vw-1rem)] rounded-lg border bg-background/95 px-3 py-2 text-xs shadow-md backdrop-blur"
+      className={cn(
+        "fixed top-[max(0.5rem,env(safe-area-inset-top))] right-2 z-50 max-w-[calc(100vw-1rem)] rounded-lg border bg-background/95 px-3 py-2 text-xs shadow-md backdrop-blur",
+        className,
+      )}
     >
       <summary className="flex min-h-9 cursor-pointer items-center gap-2 font-mono">
         <span data-testid="cost-total" className="font-semibold">

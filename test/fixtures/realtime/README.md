@@ -3,7 +3,7 @@
 JSONL recordings of real Realtime sessions, one event per line:
 `{"t": <ms since the recorder started>, "dir": "in" | "out" | "meta", "data": <event>}`.
 
-Record one with the dev tools on (`pnpm dev`, open `/dev/voice?doc=<id>`, or add
+Record one with the dev tools on (`pnpm dev`, open the chat on a ready document, or add
 `?debug=1` anywhere else), hold a short conversation, then press the download
 button. The recorder redacts `instructions` (the document and the system
 rules) and never keeps a client secret. Read the file before committing it.
