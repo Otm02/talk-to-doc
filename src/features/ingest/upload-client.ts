@@ -1,5 +1,56 @@
 import { upload } from "@vercel/blob/client";
-import { IngestError } from "./ingest-error";
+import { markReachable, markUnreachable } from "@/lib/net/connectivity";
+import { retryOnce } from "@/lib/net/retry";
+import { abortError, withTimeout } from "@/lib/net/timeout";
+import { IngestError, StreamBrokenError } from "./ingest-error";
+
+/** How long to wait for a server's first answer, per call. */
+export const HEALTH_TIMEOUT_MS = 10_000;
+export const YOUTUBE_TIMEOUT_MS = 45_000;
+/** The PDF is read before the first page goes out, so this is generous. */
+export const PDF_ANSWER_TIMEOUT_MS = 60_000;
+
+/**
+ * fetch with a deadline for the first answer. A response of any kind marks the
+ * server reachable (a refusal is an answer); no response marks it unreachable
+ * and raises a "no answer" IngestError that is safe to wait out and repeat.
+ */
+async function fetchWithin(
+  url: string,
+  init: RequestInit,
+  ms: number,
+  signal: AbortSignal | undefined,
+  code: string,
+): Promise<Response> {
+  const deadline = withTimeout(signal, ms);
+  try {
+    const res = await fetch(url, { ...init, signal: deadline.signal });
+    markReachable();
+    // The deadline was for the first byte. Stop the clock, but keep following
+    // the caller's abort: the body is still coming, and Cancel must stop it.
+    deadline.disarm();
+    return res;
+  } catch (error) {
+    deadline.dispose();
+    // The caller's own abort is not a failure to report.
+    if (signal?.aborted) throw abortError();
+    markUnreachable();
+    throw new IngestError(
+      code,
+      deadline.timedOut() ? "Timed out" : String(error),
+      undefined,
+      true,
+    );
+  }
+}
+
+/** Only a call that got no answer, or a 502 from the provider chain, is worth one more try. */
+function retryableYoutube(error: unknown): boolean {
+  return (
+    error instanceof IngestError &&
+    (error.noAnswer || error.code === "youtube_failed")
+  );
+}
 
 export type UploadMode = "direct" | "blob";
 
@@ -13,22 +64,34 @@ export interface IngestCallbacks {
 let uploadModePromise: Promise<UploadMode> | null = null;
 
 /** The server decides the mode (UPLOAD_MODE); /api/health reports it. */
-export function getUploadMode(): Promise<UploadMode> {
-  uploadModePromise ??= fetch("/api/health", { cache: "no-store" })
-    .then(async (res) => {
-      const body: unknown = await res.json();
+export function getUploadMode(signal?: AbortSignal): Promise<UploadMode> {
+  uploadModePromise ??= retryOnce(
+    async () => {
+      const res = await fetchWithin(
+        "/api/health",
+        { cache: "no-store" },
+        HEALTH_TIMEOUT_MS,
+        signal,
+        "upload_failed",
+      );
+      const body: unknown = await res.json().catch(() => null);
       const mode =
         typeof body === "object" && body !== null && "uploadMode" in body
           ? body.uploadMode
           : null;
-      if (mode !== "blob" && mode !== "direct") throw new Error("bad health");
+      if (mode !== "blob" && mode !== "direct") {
+        throw new IngestError("upload_failed", "bad health");
+      }
       return mode;
-    })
-    .catch((error: unknown) => {
-      // Don't cache a failure: the next try should ask again.
-      uploadModePromise = null;
-      throw new IngestError("upload_failed", String(error));
-    });
+    },
+    { retryable: (e) => e instanceof IngestError, signal },
+  ).catch((error: unknown) => {
+    // Don't cache a failure: the next try should ask again.
+    uploadModePromise = null;
+    throw error instanceof IngestError
+      ? error
+      : new IngestError("upload_failed", String(error));
+  });
   return uploadModePromise;
 }
 
@@ -103,10 +166,6 @@ async function errorFromResponse(res: Response): Promise<IngestError> {
   );
 }
 
-function abortError(): DOMException {
-  return new DOMException("Aborted", "AbortError");
-}
-
 /**
  * Direct mode. fetch can't report upload progress, so this uses XHR. The
  * response body is exposed as a stream by slicing `responseText` as chunks
@@ -128,6 +187,9 @@ function postFormWithProgress(
     let controller: ReadableStreamDefaultController<Uint8Array> | null = null;
     let sent = 0;
     let streaming = false;
+    let timedOut = false;
+    // Once the whole file is up, the server must start answering.
+    let answerTimer: ReturnType<typeof setTimeout> | undefined;
 
     const pump = () => {
       if (!controller) return;
@@ -139,7 +201,10 @@ function postFormWithProgress(
     };
     const onAbort = () => xhr.abort();
     signal.addEventListener("abort", onAbort, { once: true });
-    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const cleanup = () => {
+      clearTimeout(answerTimer);
+      signal.removeEventListener("abort", onAbort);
+    };
 
     xhr.open("POST", url);
     xhr.responseType = "text";
@@ -150,9 +215,17 @@ function postFormWithProgress(
         );
       }
     };
-    xhr.upload.onload = () => callbacks.onUploaded?.();
+    xhr.upload.onload = () => {
+      callbacks.onUploaded?.();
+      answerTimer = setTimeout(() => {
+        timedOut = true;
+        xhr.abort();
+      }, PDF_ANSWER_TIMEOUT_MS);
+    };
     xhr.onreadystatechange = () => {
       if (xhr.readyState !== XMLHttpRequest.HEADERS_RECEIVED) return;
+      clearTimeout(answerTimer);
+      markReachable();
       if (xhr.status < 200 || xhr.status >= 300) return; // handled in onload
       streaming = true;
       resolve(
@@ -190,12 +263,29 @@ function postFormWithProgress(
     };
     xhr.onerror = () => {
       cleanup();
-      const error = new IngestError("upload_failed", "Network error");
-      if (streaming) controller?.error(error);
-      else reject(error);
+      if (streaming) {
+        // The server was answering, so this is a stream that broke, not a
+        // request nobody answered: the pages already read stay, and nothing
+        // claims the device is offline.
+        controller?.error(
+          new StreamBrokenError("upload_failed", "Stream broke"),
+        );
+        return;
+      }
+      markUnreachable();
+      reject(
+        new IngestError("upload_failed", "Network error", undefined, true),
+      );
     };
     xhr.onabort = () => {
       cleanup();
+      if (timedOut) {
+        // Our own answer timer: the file went up and nothing came back.
+        markUnreachable();
+        reject(new IngestError("upload_failed", "Timed out", undefined, true));
+        return;
+      }
+      // The caller cancelling.
       if (streaming) controller?.error(abortError());
       else reject(abortError());
     };
@@ -232,35 +322,49 @@ export async function ingestPdf(
   }
   callbacks.onUploaded?.();
 
-  const res = await fetch("/api/ingest/pdf", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ blobUrl, fileName: file.name }),
+  // Not repeated on its own: the blob is deleted as soon as it is read.
+  const res = await fetchWithin(
+    "/api/ingest/pdf",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ blobUrl, fileName: file.name }),
+    },
+    PDF_ANSWER_TIMEOUT_MS,
     signal,
-  }).catch((error: unknown) => {
-    if (signal.aborted) throw abortError();
-    throw new IngestError("upload_failed", String(error));
-  });
+    "upload_failed",
+  );
   if (!res.ok || !res.body) throw await errorFromResponse(res);
   return res.body;
 }
 
-/** Opens the ingest stream for a YouTube link. */
+/**
+ * Opens the ingest stream for a YouTube link. Safe to repeat (the server
+ * caches the transcript), so a call that got no answer, or a 502, is tried
+ * once more by itself.
+ */
 export async function ingestYoutube(
   url: string,
   signal: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   const lang =
     typeof navigator === "undefined" ? undefined : navigator.language;
-  const res = await fetch("/api/ingest/youtube", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url, ...(lang ? { lang } : {}) }),
-    signal,
-  }).catch((error: unknown) => {
-    if (signal.aborted) throw abortError();
-    throw new IngestError("youtube_failed", String(error));
-  });
-  if (!res.ok || !res.body) throw await errorFromResponse(res);
-  return res.body;
+  return retryOnce(
+    async () => {
+      const res = await fetchWithin(
+        "/api/ingest/youtube",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url, ...(lang ? { lang } : {}) }),
+        },
+        YOUTUBE_TIMEOUT_MS,
+        signal,
+        "youtube_failed",
+      );
+      if (!res.ok || !res.body) throw await errorFromResponse(res);
+      return res.body;
+    },
+    { retryable: retryableYoutube, signal },
+  );
 }

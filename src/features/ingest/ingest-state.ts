@@ -22,9 +22,18 @@ export interface DocumentData {
 
 export type IngestState =
   | { status: "idle" }
-  | { status: "uploading"; fileName: string; size: number; percent: number }
+  | {
+      status: "uploading";
+      fileName: string;
+      size: number;
+      percent: number;
+      /** No progress for a while: the screen offers Cancel and Keep waiting. */
+      stalled: boolean;
+    }
   | { status: "extracting"; doc: DocumentData | null }
   | { status: "ready"; doc: DocumentData }
+  /** The stream broke after the document began: what arrived is kept. */
+  | { status: "partial"; doc: DocumentData; code: string }
   | {
       status: "error";
       code: string;
@@ -36,7 +45,17 @@ export type IngestState =
 export type IngestAction =
   | { type: "upload-start"; fileName: string; size: number }
   | { type: "upload-progress"; percent: number }
+  | { type: "upload-stalled" }
+  | { type: "upload-resume" }
+  /** The stream broke. With pages in hand they are kept; without, it is a plain failure. */
+  | { type: "interrupt"; code: string }
   | { type: "extract-start" }
+  /**
+   * A load that has no upload step (a link) begins. Unlike extract-start it
+   * always leaves what was on screen, so a document that is being loaded again
+   * shows as loading instead of staying put with its buttons live.
+   */
+  | { type: "load-start" }
   | { type: "meta"; meta: MetaLine; fileName?: string }
   | { type: "units"; pages: PageLine[]; segments: SegmentLine["segment"][] }
   | { type: "done"; done: DoneLine }
@@ -56,11 +75,27 @@ export function ingestReducer(
         fileName: action.fileName,
         size: action.size,
         percent: 0,
+        stalled: false,
       };
     case "upload-progress":
+      // Any progress at all means the link is moving again.
       return state.status === "uploading"
-        ? { ...state, percent: action.percent }
+        ? { ...state, percent: action.percent, stalled: false }
         : state;
+    case "upload-stalled":
+      return state.status === "uploading" && !state.stalled
+        ? { ...state, stalled: true }
+        : state;
+    case "upload-resume":
+      return state.status === "uploading" && state.stalled
+        ? { ...state, stalled: false }
+        : state;
+    case "interrupt":
+      return state.status === "extracting" && state.doc
+        ? { status: "partial", doc: state.doc, code: action.code }
+        : { status: "error", code: action.code };
+    case "load-start":
+      return { status: "extracting", doc: null };
     case "extract-start":
       // A late "uploaded" event must not wipe a document that already arrived.
       return state.status === "extracting" || state.status === "ready"

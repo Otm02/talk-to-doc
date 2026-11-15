@@ -3,16 +3,48 @@ import { EMPTY_USAGE, type UsageTotals } from "./usage";
 
 export type Mode = "voice" | "text";
 
+/**
+ * Where an automatic reconnect is. "grace" waits for the link to heal on its
+ * own; the others are the steps of getting a new session (reconnect.ts).
+ */
+export type ReconnectPhase =
+  | "grace"
+  | "waitingNetwork"
+  | "backoff"
+  | "minting"
+  | "connecting"
+  | "cooldown";
+
 export type ConnectionState =
   | { status: "idle" }
   | { status: "requestingMic" }
-  | { status: "connecting"; phase: "minting" | "negotiating" }
+  | {
+      status: "connecting";
+      /** waitingNetwork: the first mint got no answer and is waiting for the connection. */
+      phase: "minting" | "negotiating" | "waitingNetwork";
+    }
   | { status: "connected" }
-  | { status: "reconnecting"; since: number }
+  | {
+      status: "reconnecting";
+      since: number;
+      phase: ReconnectPhase;
+      /** 0 while still in grace; 1..maxAttempts once a new session is being sought. */
+      attempt: number;
+      maxAttempts: number;
+      /** Deadline (ms since epoch) of a cooldown after a 429, for the live countdown. */
+      retryAt?: number;
+      /** This attempt follows a cooldown, so the cooldown was its backoff. */
+      afterCooldown?: boolean;
+    }
   | { status: "ended"; reason: EndReason }
   | {
       status: "failed";
       code: FailureCode;
+      /**
+       * The chat was live and the failure came out of rebuilding its link. A
+       * retry then goes on with the same conversation instead of starting over.
+       */
+      fromReconnect?: boolean;
       /** Seconds to wait before trying again, when the server said so (429). */
       retryAfterSeconds?: number;
       /**
@@ -90,6 +122,16 @@ export interface RealtimeState {
   /** Visible item ids in conversation order. Derived from `items`. */
   order: string[];
   epoch: number;
+  /**
+   * Epochs that began with an automatic or manual reconnect. The transcript
+   * draws a "Reconnected" divider before the first item of each.
+   */
+  reconnectMarks: number[];
+  /**
+   * Counts chats, not sessions: a reconnect starts a new session (epoch) inside
+   * the same chat, and the chat's timer must keep counting through it.
+   */
+  chatSeq: number;
   arrivalSeq: number;
   response: {
     /** Response between response.created and response.done. */
@@ -114,6 +156,8 @@ export const initialState: RealtimeState = {
   items: {},
   order: [],
   epoch: 0,
+  reconnectMarks: [],
+  chatSeq: 0,
   arrivalSeq: 0,
   response: { activeId: null, audioId: null },
   pending: {},

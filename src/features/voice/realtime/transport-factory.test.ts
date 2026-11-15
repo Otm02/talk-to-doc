@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeAudioElement } from "@test/realtime/fakes";
 import { MockTransport } from "./mock-transport";
 import { TransportError } from "./transport";
-import { createTransport, mockScenarioFromSearch } from "./transport-factory";
+import { isMockNet } from "./mock-names";
+import {
+  createTransport,
+  mockScenarioFromSearch,
+  netScript,
+  resetMockNetForTests,
+} from "./transport-factory";
 import { WebRtcTransport } from "./webrtc-transport";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -96,5 +102,67 @@ describe("createTransport", () => {
     await expect(
       createTransport({ audioElement: null }, ""),
     ).rejects.toBeInstanceOf(TransportError);
+  });
+});
+
+describe("scripted network trouble (?mockNet)", () => {
+  it("only the first transport of a page misbehaves", () => {
+    for (const name of [
+      "drop-recover",
+      "drop-timeout",
+      "failed",
+      "expired",
+    ] as const) {
+      const first = netScript(name, 0);
+      const second = netScript(name, 1);
+      expect(
+        (first.linkSteps?.length ?? 0) + first.steps.length,
+      ).toBeGreaterThan(0);
+      expect(second).toEqual({ steps: [] });
+    }
+  });
+
+  it("'dead' keeps failing every connect after the first", () => {
+    expect(netScript("dead", 0).linkSteps).toEqual([
+      { at: 600, state: "failed" },
+    ]);
+    expect(netScript("dead", 1).failWith).toBe("network");
+    expect(netScript("dead", 5).failWith).toBe("network");
+  });
+
+  it("drop-recover heals the link two seconds later", () => {
+    expect(netScript("drop-recover", 0).linkSteps).toEqual([
+      { at: 600, state: "disconnected" },
+      { at: 2600, state: "connected" },
+    ]);
+  });
+
+  it("builds the scripted mock for the first transport and a clean one after", async () => {
+    resetMockNetForTests();
+    const search = "?mockRealtime=text-turn&mockNet=failed";
+    vi.useFakeTimers();
+    try {
+      const seen: string[][] = [[], []];
+      for (const i of [0, 1]) {
+        const t = await createTransport({ audioElement: null }, search);
+        expect(t).toBeInstanceOf(MockTransport);
+        t.onStateChange((s) => seen[i]?.push(s));
+        const p = t.connect({ clientSecret: "x", micStream: null });
+        await vi.advanceTimersByTimeAsync(1_000);
+        await p;
+        t.close();
+      }
+      expect(seen[0]).toContain("failed");
+      expect(seen[1]).not.toContain("failed");
+    } finally {
+      vi.useRealTimers();
+      resetMockNetForTests();
+    }
+  });
+
+  it("knows the scenario names", () => {
+    expect(isMockNet("dead")).toBe(true);
+    expect(isMockNet("nope")).toBe(false);
+    expect(isMockNet(null)).toBe(false);
   });
 });

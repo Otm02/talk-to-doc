@@ -35,7 +35,10 @@ import { Composer } from "./composer";
 import { ControlBar } from "./control-bar";
 import { EndConfirm } from "./end-confirm";
 import { ExportButtons } from "./export-buttons";
+import { useAnnounceChatOpen } from "@/components/chat-open";
+import { OfflineBanner } from "@/components/offline-banner";
 import { FailureCard } from "./failure-card";
+import { ReconnectNotice } from "./reconnect-notice";
 import { LevelDot } from "./level-dot";
 import { MicBanner } from "./mic-banner";
 import { Orb } from "./orb";
@@ -45,7 +48,7 @@ import { isInProgress, isLive, statusInfo } from "./status-map";
 import { StatusPill } from "./status-pill";
 import { Transcript } from "./transcript";
 import { useCompactLayout } from "./use-compact-layout";
-import { useOnline } from "./use-online";
+import { useOnline } from "@/lib/net/use-online";
 
 export type VoiceSessionApi = ReturnType<typeof useVoiceSession>;
 
@@ -70,6 +73,7 @@ export function ConversationScreen({
   doc,
   session,
   onStart,
+  onReloadSource,
   onEnd,
   onClose,
 }: {
@@ -77,6 +81,8 @@ export function ConversationScreen({
   session: VoiceSessionApi;
   /** Called inside the tap, so the mic prompt keeps the user's gesture. */
   onStart: (mode: Mode) => void;
+  /** Loads the document again from the source the page still holds (it expired on the server). */
+  onReloadSource?: () => void;
   /** The user confirmed End. */
   onEnd: () => void;
   onClose: () => void;
@@ -89,6 +95,8 @@ export function ConversationScreen({
     model,
     maxSessionSeconds,
   } = session;
+  // The page behind this overlay has its own offline banner; it steps aside.
+  useAnnounceChatOpen();
   const debug = useDebug();
   const online = useOnline();
   const [typing, setTyping] = useState(false);
@@ -221,7 +229,8 @@ export function ConversationScreen({
         {/* Always in the same place while live, so it keeps counting when the layout changes. */}
         {live && (
           <SessionTimer
-            key={state.epoch}
+            // Per chat, not per session: a reconnect must not restart the clock.
+            key={state.chatSeq}
             maxSeconds={maxSessionSeconds}
             quiet={slim}
           />
@@ -252,6 +261,13 @@ export function ConversationScreen({
           <Ellipsis aria-hidden className="size-5" />
         </Button>
       </header>
+
+      {/* While reconnecting the notice says why; otherwise a lost link still shows. */}
+      {c.status === "reconnecting" ? (
+        <ReconnectNotice connection={c} />
+      ) : (
+        inProgress && <OfflineBanner className="shrink-0" />
+      )}
 
       {!slim && (
         <>
@@ -301,7 +317,13 @@ export function ConversationScreen({
           <FailureCard
             code={c.code}
             retryAt={c.retryAt}
-            onRetry={() => startChat(state.mode)}
+            // A failure from rebuilding the link keeps the transcript and sends
+            // it along; a failed first start has none and starts over.
+            onRetry={
+              c.fromReconnect ? actions.reconnect : () => startChat(state.mode)
+            }
+            onSwitchToText={actions.switchToText}
+            onReloadSource={onReloadSource}
           />
           <div className="px-4">
             <Button variant="outline" className="h-12 w-full" onClick={onClose}>

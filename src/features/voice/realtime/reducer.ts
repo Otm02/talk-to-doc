@@ -27,6 +27,10 @@ export type Action =
   | { type: "reset" }
   /** A replacement session for the same chat: the transcript stays. */
   | { type: "restart" }
+  /** A reconnect gave up on the old session: whatever was mid-flight will never finish. */
+  | { type: "reconnect-settle" }
+  /** A new session is up in the same chat: remember where, for the transcript divider. */
+  | { type: "reconnected" }
   | { type: "server"; event: ServerEvent }
   | { type: "diagnostic"; kind: "unknown" | "malformed"; eventType?: string }
   | { type: "connection"; connection: ConnectionState }
@@ -231,7 +235,8 @@ function canTransition(
     case "connected":
       return from === "connecting" || from === "reconnecting";
     case "reconnecting":
-      return from === "connected";
+      // Also from itself: each phase of a reconnect is a new state.
+      return from === "connected" || from === "reconnecting";
     case "ended":
       return (
         from === "requestingMic" ||
@@ -742,7 +747,20 @@ function onServerEvent(
 export function reducer(state: RealtimeState, action: Action): RealtimeState {
   switch (action.type) {
     case "reset":
-      return initialState;
+      return { ...initialState, chatSeq: state.chatSeq + 1 };
+    case "reconnect-settle": {
+      const settled = settleItems(state);
+      return {
+        ...settled,
+        activity: "listening",
+        response: { activeId: null, audioId: null },
+        pending: {},
+      };
+    }
+    case "reconnected":
+      return state.reconnectMarks.includes(state.epoch)
+        ? state
+        : { ...state, reconnectMarks: [...state.reconnectMarks, state.epoch] };
     case "restart": {
       // Whatever was mid-flight on the old session will never finish.
       const items: RealtimeState["items"] = {};
@@ -754,6 +772,8 @@ export function reducer(state: RealtimeState, action: Action): RealtimeState {
         items,
         order: visibleOrder(items),
         epoch: state.epoch,
+        reconnectMarks: state.reconnectMarks,
+        chatSeq: state.chatSeq + 1,
         arrivalSeq: state.arrivalSeq,
       };
     }

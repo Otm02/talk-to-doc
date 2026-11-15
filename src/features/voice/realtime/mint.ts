@@ -1,4 +1,6 @@
 import { ERROR_CATALOG } from "@/lib/errors/catalog";
+import { markReachable, markUnreachable } from "@/lib/net/connectivity";
+import { withTimeout } from "@/lib/net/timeout";
 import {
   ErrorBodySchema,
   SessionResponseSchema,
@@ -76,6 +78,9 @@ export function clampHistory(turns: readonly HistoryTurn[]): HistoryTurn[] {
     }));
 }
 
+/** A mint that has not answered by now is treated as no answer at all. */
+export const MINT_TIMEOUT_MS = 15_000;
+
 export async function mintSession(
   documentId: string,
   signal: AbortSignal,
@@ -83,6 +88,7 @@ export async function mintSession(
   history: readonly HistoryTurn[] = [],
 ): Promise<SessionResponse> {
   const turns = clampHistory(history);
+  const deadline = withTimeout(signal, MINT_TIMEOUT_MS);
   let res: Response;
   try {
     res = await doFetch("/api/realtime/session", {
@@ -92,21 +98,38 @@ export async function mintSession(
         turns.length > 0 ? { documentId, history: turns } : { documentId },
       ),
       cache: "no-store",
-      signal,
+      signal: deadline.signal,
     });
   } catch (err) {
     // An abort is the caller's own doing; let it through unchanged.
+    deadline.dispose();
     if (signal.aborted) throw err;
-    // fetch only throws when no response came back at all: that is the
-    // network, not a refusal, and the UI says "Offline" for it.
+    // The deadline passing is not "nothing happened": the server may have
+    // minted a secret and counted it while we stopped listening. Saying so as
+    // "offline" would also send the first-start flow to mint again, which is a
+    // second secret for one chat. It is a failure the user retries.
+    if (deadline.timedOut()) throw new MintError("session_connect_failed");
+    // fetch threw before any response came back: that is the network, not a
+    // refusal, nothing was created, and the UI says "Offline".
+    markUnreachable();
     throw new MintError("session_network_failed");
   }
+  // Any answer, even a refusal, proves the server can be reached.
+  markReachable();
 
+  // The deadline stays armed while the body streams in.
   let body: unknown;
   try {
     body = await res.json();
   } catch {
-    throw new MintError(res.ok ? "session_connect_failed" : "internal");
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    // The server answered, so this is not offline. A body that stalled after
+    // a 200 may still have cost a secret: no automatic second mint.
+    throw new MintError(
+      res.ok || deadline.timedOut() ? "session_connect_failed" : "internal",
+    );
+  } finally {
+    deadline.dispose();
   }
 
   if (!res.ok) {

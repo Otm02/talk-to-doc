@@ -7,7 +7,11 @@ import type { IngestState } from "./ingest-state";
 type Working = Extract<IngestState, { status: "uploading" | "extracting" }>;
 
 function statusText(state: Working): string {
-  if (state.status === "uploading") return "Uploading…";
+  if (state.status === "uploading") {
+    if (state.stalled) return "Connection is slow";
+    // All bytes are sent; the server is still taking them in.
+    return state.percent >= 100 ? "Finishing upload…" : "Uploading…";
+  }
   const meta = state.doc?.meta;
   if (!meta) return "Reading…";
   if (meta.sourceType === "pdf") {
@@ -22,10 +26,13 @@ export function UploadStatus({
   state,
   source,
   onCancel,
+  onKeepWaiting,
 }: {
   state: Working;
   source: "pdf" | "youtube";
   onCancel: () => void;
+  /** Offered with "Connection is slow", next to Cancel. */
+  onKeepWaiting?: () => void;
 }) {
   const text =
     state.status === "extracting" && !state.doc && source === "youtube"
@@ -50,14 +57,28 @@ export function UploadStatus({
           </span>
         </Progress>
       ) : (
-        <Loader2 aria-hidden className="size-5 animate-spin text-muted-foreground" />
+        <Loader2
+          aria-hidden
+          className="size-5 text-muted-foreground motion-safe:animate-spin"
+        />
       )}
       <p role="status" aria-live="polite" className="text-sm">
         {text}
       </p>
-      <Button variant="outline" className="h-11" onClick={onCancel}>
-        Cancel
-      </Button>
+      {state.status === "uploading" && state.stalled && onKeepWaiting ? (
+        <div className="flex gap-2">
+          <Button variant="outline" className="h-11 flex-1" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button className="h-11 flex-1" onClick={onKeepWaiting}>
+            Keep waiting
+          </Button>
+        </div>
+      ) : (
+        <Button variant="outline" className="h-11" onClick={onCancel}>
+          Cancel
+        </Button>
+      )}
     </div>
   );
 }

@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isOffline, resetConnectivityForTests } from "@/lib/net/connectivity";
 import {
+  MINT_TIMEOUT_MS,
   MintError,
   mintSession,
   parseRetryAfter,
@@ -227,5 +229,91 @@ describe("Retry-After on a rate limit", () => {
       expect(body.history.at(-1).text).toHaveLength(4000);
       expect(body.history[0]).toEqual(turn(11));
     });
+  });
+});
+
+describe("mintSession: the deadline", () => {
+  /** A fetch that answers nothing until it is aborted, like a hung server. */
+  const hung = () =>
+    vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    ) as unknown as typeof fetch;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("navigator", { onLine: true });
+    resetConnectivityForTests();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("gives up after 15 s with a visible failure, not an offline one", async () => {
+    const p = mintSession("doc-1", new AbortController().signal, hung()).catch(
+      (e: unknown) => e,
+    );
+    await vi.advanceTimersByTimeAsync(MINT_TIMEOUT_MS - 1);
+    let settled = false;
+    void p.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await p).toMatchObject({ code: "session_connect_failed" });
+  });
+
+  it("does not claim the device is offline: the server may simply be slow", async () => {
+    const p = mintSession("doc-1", new AbortController().signal, hung()).catch(
+      () => {},
+    );
+    await vi.advanceTimersByTimeAsync(MINT_TIMEOUT_MS + 1);
+    await p;
+    expect(isOffline()).toBe(false);
+  });
+
+  it("a request that fails outright is still the network", async () => {
+    const f = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+    await expect(
+      mintSession("doc-1", new AbortController().signal, f),
+    ).rejects.toMatchObject({ code: "session_network_failed" });
+    expect(isOffline()).toBe(true);
+  });
+
+  it("a body that stalls after a 200 is a failure to retry, never a quiet second mint", async () => {
+    const stalled = vi.fn(
+      async (_url: string, init?: RequestInit) =>
+        ({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          json: () =>
+            new Promise((_, reject) => {
+              init?.signal?.addEventListener("abort", () =>
+                reject(new DOMException("Aborted", "AbortError")),
+              );
+            }),
+        }) as unknown as Response,
+    ) as unknown as typeof fetch;
+    const p = mintSession("doc-1", new AbortController().signal, stalled).catch(
+      (e: unknown) => e,
+    );
+    await vi.advanceTimersByTimeAsync(MINT_TIMEOUT_MS + 1);
+    expect(await p).toMatchObject({ code: "session_connect_failed" });
+    // The server did answer.
+    expect(isOffline()).toBe(false);
+  });
+
+  it("the caller's own abort is passed through, not turned into a failure", async () => {
+    const c = new AbortController();
+    const p = mintSession("doc-1", c.signal, hung()).catch((e: unknown) => e);
+    c.abort();
+    expect(await p).toMatchObject({ name: "AbortError" });
   });
 });

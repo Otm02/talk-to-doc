@@ -3,6 +3,7 @@ import { StrictMode, type ReactNode } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeHarness, type Harness } from "@test/realtime/harness";
+import { MintError } from "./mint";
 import { scenarioScript } from "./mock-scenarios";
 import { useVoiceSession } from "./use-voice-session";
 
@@ -55,11 +56,13 @@ describe("useVoiceSession", () => {
       "downloadEvents",
       "enableMic",
       "end",
+      "reconnect",
       "retryText",
       "sendText",
       "setMuted",
       "start",
       "stopAnswer",
+      "switchToText",
     ]);
   });
 
@@ -164,5 +167,61 @@ describe("useVoiceSession", () => {
     const off = makeHarness();
     const other = mountHook(off);
     expect(() => other.api().actions.downloadEvents()).not.toThrow();
+  });
+
+  describe("after the connection is lost", () => {
+    /** A voice chat whose link died and could not be rebuilt. */
+    async function lost() {
+      const h = makeHarness({ script: scenarioScript("normal-turn") });
+      const hook = mountHook(h);
+      act(() => hook.api().actions.start("voice"));
+      await settle(3_000);
+      h.mint.mockRejectedValue(new MintError("session_connect_failed"));
+      act(() => h.transport.emitState("failed"));
+      await settle(15_000);
+      expect(hook.api().state.connection).toMatchObject({
+        status: "failed",
+        code: "session_reconnect_failed",
+      });
+      return { h, ...hook };
+    }
+
+    it("reconnect() starts one new session with the transcript carried over", async () => {
+      const { h, api } = await lost();
+      const turns = api().state.order.length;
+      h.mint.mockReset();
+      h.mint.mockResolvedValue(h.response);
+      act(() => api().actions.reconnect());
+      await settle(200);
+      expect(api().state.connection.status).toBe("connected");
+      expect(api().state.mode).toBe("voice");
+      expect(h.mint).toHaveBeenCalledOnce();
+      expect(h.mint.mock.calls[0]?.[2]).toHaveLength(turns);
+      expect(api().state.order.length).toBeGreaterThanOrEqual(turns);
+    });
+
+    it("switchToText() carries on in text mode, with the transcript, and no mic", async () => {
+      const { h, api } = await lost();
+      h.mint.mockReset();
+      h.mint.mockResolvedValue(h.response);
+      act(() => api().actions.switchToText());
+      await settle(200);
+      expect(api().state.connection.status).toBe("connected");
+      expect(api().state.mode).toBe("text");
+      expect(h.transport.lastConnect?.micStream).toBeNull();
+      expect(api().state.order.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("both do nothing in a chat that is not in the lost state", async () => {
+      const h = makeHarness();
+      const { api } = mountHook(h);
+      act(() => api().actions.start("text"));
+      await settle(100);
+      act(() => api().actions.reconnect());
+      act(() => api().actions.switchToText());
+      await settle(100);
+      expect(h.mint).toHaveBeenCalledOnce();
+      expect(api().state.mode).toBe("text");
+    });
   });
 });

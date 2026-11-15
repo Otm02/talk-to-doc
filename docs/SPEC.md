@@ -69,7 +69,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | RS-1 | Paste a captioned YouTube link and check the transcript loads | Provider chain with Supadata on Vercel; cache by `videoId+lang` so repeats are free; clear copy for every failure | `e2e/ingest-youtube.spec.ts`, MC-7 | M3 |
 | RS-2 | Upload a PDF and check the whole text was extracted | Blob upload, every page streamed into the preview, page count and character stats shown, coverage notice explains what the model sees | `e2e/ingest-pdf.spec.ts`, MC-6 | M2, M4, M11 |
 | RS-3 | On a phone: start a voice chat, interrupt the assistant, ask a natural follow-up | Server VAD barge-in plus a Stop button; conversation history kept in the session; iOS audio unlock; echo cancellation | `reducer.test.ts` (interrupt paths), MC-3, MC-4 | M6, M7, M8 |
-| RS-4 | Use it on a bad network and judge stability | Reconnect state machine with transcript carry-over, offline banner, upload retry, idempotent ingest | `e2e/network.spec.ts`, `reconnect.test.ts`, MC-5 | M9 |
+| RS-4 | Use it on a bad network and judge stability | Reconnect state machine with transcript carry-over, offline banner and resume, slow-upload and stalled-stream handling, one retry for idempotent calls | `e2e/network.spec.ts`, `reconnect.test.ts`, MC-5 | M9 |
 | RS-5 | Read the code structure, env handling and secret management | Module map, single `env.ts`, adapters, threat list (section 8), CI secret scan | reviewer agent, `env.test.ts`, gitleaks job | M1, M10 |
 
 ### 2.4 Rubric rows (what earns the top score)
@@ -89,7 +89,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | MC-2 | Paste a captioned video locally: transcript loads with timestamps | local | no |
 | MC-3 | Voice on a real phone: ask, interrupt mid-answer, follow up; transcript stays in order | preview | yes, ~2 min on mini |
 | MC-4 | iPhone Safari and Android Chrome at real size: safe areas, keyboard over the composer, rotation, screen lock | preview | yes, ~2 min |
-| MC-5 | Toggle airplane mode for 5 s and 30 s mid-session; switch Wi-Fi to cellular | preview | yes, ~2 min |
+| MC-5 | Toggle airplane mode for 5 s and 30 s mid-session; switch Wi-Fi to cellular; connect and disconnect Bluetooth earbuds (the full list is ARCHITECTURE 10.2) | preview | yes, ~2 min |
 | MC-6 | Production: upload a 20 MB PDF and a 300-page PDF | production | no |
 | MC-7 | Production: paste 3 captioned videos (one long, one non-English, one auto-captions only) | production | no |
 | MC-8 | Trip each budget guard on a preview by setting low caps; read the copy | preview | yes, minimal |
@@ -136,7 +136,11 @@ Global layout at 390x844: one column, `min-height: 100dvh`, `env(safe-area-inset
 | thinking | "Thinking…" | typing dots in the transcript | Stop, End |
 | assistantSpeaking | "Speaking" | assistant caption streams in | **Stop** (interrupt), Mute, End |
 | muted (flag) | "Muted" (grey) | meter flat, "Your mic is off" | Unmute, End |
-| reconnecting | "Reconnecting… (attempt 2 of 3)" (amber) | transcript stays visible, input disabled | End |
+| reconnecting | "Reconnecting" (amber), with a line under the header: "Connection interrupted. Waiting for it to recover…" during the 8 s grace, then "Reconnecting… (attempt 2 of 3)" | transcript stays visible, input disabled | End |
+| reconnecting, device offline | "Offline" (amber), line: "You're offline. We'll reconnect when you're back." Nothing is minted until the connection returns | same | End |
+| reconnecting, after a 429 | "Cooldown" (amber), line: "Too many tries. Reconnecting in 42s." counting down from a deadline; it resumes by itself at 0 | same | End |
+| reconnected | a "Reconnected" divider in the transcript before the first message of the new session; the pill is back to normal | all | all |
+| Connection lost (3 attempts failed) | "Not connected" (red), card: "Connection lost. Check your network and try again." | transcript stays visible | **Reconnect**, **Switch to text**, Back to document |
 | ending | "Ending…" | — | — |
 | ended | "Chat ended" | reason line (see section 4), transcript kept | **Start again**, Type instead |
 | error | pill says why (see below) | error card with exact copy | Retry, counted down when the server gave a wait; Type instead (when the cause is the mic) |
@@ -151,6 +155,8 @@ Global layout at 390x844: one column, `min-height: 100dvh`, `env(safe-area-inset
 | `navigator.onLine` is false, or a request got no answer (`session_network_failed`) | Offline |
 | The kill switch or the budget (`voice_disabled`, `budget_exhausted`) | Unavailable |
 | Anything else, including a connection that dropped while the device is online (`session_reconnect_failed`) | Not connected |
+
+While a reconnect is running the same words apply: Offline only while it waits for the network, Cooldown for a 429 on the way back, otherwise Reconnecting. A reconnect never feeds a retry loop (see 4.2).
 
 Every 429 carries its wait twice: the `Retry-After` header and `error.retryAfterSec` in the JSON body (for `daily_limit`, the seconds until UTC midnight). The retry button reads "Try again in 42s" (or "8m 58s", "7h 12m"), counts down from a deadline so it cannot drift, and re-enables itself at 0. Screen readers hear the wait once when it starts and once when it ends, not on every tick. Ingestion 429s use the same button.
 
@@ -174,7 +180,9 @@ Text mode uses the same Realtime session with `output_modalities: ["text"]` per 
 
 ### 3.5 Global
 
-- Offline banner (top, `role="status"`): "You're offline. We'll reconnect when you're back."
+- Offline banner (top, `role="status"`): "You're offline. We'll reconnect when you're back." It shows when `navigator.onLine` is false or a request got no answer, and goes at the first answer of any kind (a 429 is an answer). A load that failed for lack of an answer runs again once by itself when the connection returns.
+- Slow upload: with no progress for 20 s the upload card says "Connection is slow" with **Cancel** and **Keep waiting**. The percent shown is always the real one.
+- Broken stream: when a document stops arriving part-way, what arrived stays on screen with "The connection dropped. You have 37 of 120 pages." and **Try again** / **Start over**. A YouTube stream is asked for again once, silently, first.
 - Unknown route: "Page not found." with **Go home**.
 - Unexpected crash (React error boundary): "Something went wrong. Reload to try again." with **Reload**.
 
@@ -224,13 +232,15 @@ Private videos map to `youtube_unavailable` because neither YouTube's player res
 | `doc_not_found` | 404 | We couldn't find that document. Please add the source again. | Add the source again |
 | `session_connect_failed` | 502 | Couldn't connect to voice chat. Try again. | Try again |
 | `session_upstream_busy` | 503 | The voice service is busy. Try again in a moment. | Try again |
-| `session_reconnect_failed` | — | Connection lost. Check your network and try again. | Try again |
+| `session_reconnect_failed` | — | Connection lost. Check your network and try again. | Reconnect; Switch to text |
 | `session_max_duration` | — | This chat reached its N-minute limit. Start a new one to keep going. (N is `MAX_SESSION_MINUTES`; the session response carries it as `maxSessionSeconds`.) | Start again |
 | `session_idle` | — | Chat ended after 2 minutes of silence. Start again when you're ready. | Start again |
 | `session_hidden` | — | Chat ended because the app was in the background. | Start again |
 | `rate_limited` | 429 | Too many tries. Try again when the timer ends. | Try again (after `Retry-After`) |
 | `invalid_request` | 400 | Something was wrong with that request. Reload and try again. | Reload |
 | `internal` | 500 | Something went wrong on our side. Try again. | Try again |
+
+**Reconnecting.** On `disconnected` the chat waits 8 s for the link to heal; on `failed`, a closed data channel, a session-expired error or the end of that wait it builds a new session: at most 3 attempts, backoff 0 / 2 / 4 s (a link that drops again within 30 s of coming back continues the same count, and one chat gets at most 6 reconnect mints in all), one client secret per attempt (each counts against `DAILY_SESSION_CAP`), the finished turns sent as history, the mic stream, audio and cap timer kept. Offline, it waits without using an attempt. A 429 becomes a Cooldown for exactly its wait and then one more attempt; `voice_disabled`, `daily_limit` and `budget_exhausted` never reconnect. When the mic track itself ends (Bluetooth switch, an OS interruption), the mic is opened once more and swapped in with `replaceTrack`: no new secret. If the document expired on the server (`doc_not_found`), the card offers **Load it again**, which re-ingests the file or link still held in memory.
 
 **Try microphone again never restarts the chat.** A tap runs, in this order: (1) `navigator.permissions.query({ name: "microphone" })`, inside a try because some browsers do not support it; if it says `denied`, show the coach and stop; (2) `getUserMedia`; on `NotAllowedError`, `NotFoundError` or `NotReadableError`, show the reason and the coach and stop; (3) only with a stream in hand, `sender.replaceTrack(micTrack)` on the connection the text chat already has: no renegotiation, no new client secret. If the track cannot be swapped in, the chat reconnects exactly once with one fresh secret, reusing the stream. Steps 1 and 2 make no request, so a button that cannot work costs nothing. The button stays visible and enabled throughout, taps under a second apart count once, and a chat mints one secret however long it stays in text mode.
 
@@ -376,7 +386,7 @@ OpenAI enforces the hard $20 limit on the key, for the build, QA, the video and 
 | `CONTEXT_TOKEN_BUDGET` | 8000 / 20000 | caps instruction size | coverage notice |
 | `VOICE_ENABLED` | true / true | kill switch, checked on every mint and by `/api/limits` | `voice_disabled` |
 | Per-IP mint limit | 15 per 10 min | sliding window; **fails closed** on limiter timeout. Minting a secret costs nothing and phones behind one address share the bucket, so this only has to stop a loop; `DAILY_SESSION_CAP` and OpenAI's hard limit guard spend. (It was 5 until M8: a real phone used that up retrying its mic) | `rate_limited`, shown as "Cooldown" with a countdown |
-| `DAILY_SESSION_CAP` | 50 / 25 | daily fixed-window counter in RateLimiter, keyed by UTC date (memory locally, Upstash on Vercel); reconnects of the same session within 10 min do not count | `daily_limit` |
+| `DAILY_SESSION_CAP` | 50 / 25 | daily fixed-window counter in RateLimiter, keyed by UTC date (memory locally, Upstash on Vercel); every mint counts, a reconnect's included (each is one client secret, and there is no token a client could replay to skip the count) | `daily_limit` |
 | `MAX_SESSION_MINUTES` | 5 | client ends the chat; warning 1 min before | warning toast, then `session_max_duration` |
 | Idle hang-up | 120 s with no speech and no response | client ends the chat | `session_idle` |
 | Hidden tab | 60 s `visibilityState = hidden` | client ends the chat | `session_hidden` |

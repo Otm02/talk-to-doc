@@ -53,6 +53,10 @@ export function makeHarness(options: HarnessOptions = {}) {
   let resolveMic: (v: { ok: true; stream: MediaStream }) => void = () => {};
   let resolveMint: (v: SessionResponse) => void = () => {};
   const visibility = { hidden: false, listeners: new Set<() => void>() };
+  // The network as the session sees it. Tests flip it and let waiters go.
+  const net = { offline: false, waiters: new Set<() => void>() };
+  // One script per transport built, in order; then options.script.
+  const scripts: MockScript[] = [];
 
   const response: SessionResponse = {
     clientSecret: "ek_test_not_a_real_secret",
@@ -105,7 +109,7 @@ export function makeHarness(options: HarnessOptions = {}) {
     const t = new MockTransport({
       connectDelayMs: 0,
       steps: [],
-      ...options.script,
+      ...(scripts.shift() ?? options.script),
     });
     transports.push(t);
     return t;
@@ -145,6 +149,27 @@ export function makeHarness(options: HarnessOptions = {}) {
       return r;
     }),
     now: () => Date.now(),
+    isOffline: () => net.offline,
+    waitForConnection: (signal) =>
+      new Promise<void>((resolve, reject) => {
+        if (!net.offline) {
+          resolve();
+          return;
+        }
+        const done = () => {
+          net.waiters.delete(done);
+          resolve();
+        };
+        net.waiters.add(done);
+        signal.addEventListener(
+          "abort",
+          () => {
+            net.waiters.delete(done);
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      }),
     isDebug: () => options.debug ?? false,
     visibility: {
       isHidden: () => visibility.hidden,
@@ -168,6 +193,18 @@ export function makeHarness(options: HarnessOptions = {}) {
     setMic(result: HarnessOptions["mic"], permission?: MicPermission) {
       micNow.result = result;
       micNow.permission = permission;
+    },
+    /** The next transport this session builds follows this script. */
+    queueTransport(script: MockScript) {
+      scripts.push(script);
+    },
+    /** Take the device offline, or bring it back and wake anything waiting. */
+    setOffline(offline: boolean) {
+      net.offline = offline;
+      if (!offline) for (const w of [...net.waiters]) w();
+    },
+    get waitingForNetwork(): number {
+      return net.waiters.size;
     },
     frames,
     micStreams,

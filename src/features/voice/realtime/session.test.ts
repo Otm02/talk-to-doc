@@ -390,16 +390,20 @@ describe("something unexpected inside the start-up", () => {
 });
 
 describe("the microphone disappears mid-chat", () => {
-  it("carries on as a text chat, with the mic reason and no stuck 'muted'", async () => {
+  it("carries on as a text chat, with the mic reason and no stuck 'muted', when it cannot be had again", async () => {
     const h = await started("voice");
     h.session.setMuted(true);
+    h.setMic("unavailable");
     h.micStreams[0]?.tracks[0]?.end();
+    await settle(100);
 
     const s = h.session.getState();
     expect(s.connection.status).toBe("connected");
     expect(s.mode).toBe("text");
     expect(s.micIssue).toBe("unavailable");
     expect(s.muted).toBe(false);
+    // Asking again costs no new secret.
+    expect(h.mint).toHaveBeenCalledOnce();
 
     // Typed questions now ask for text replies, like any text chat.
     h.transport.sent.length = 0;
@@ -416,6 +420,8 @@ describe("the microphone disappears mid-chat", () => {
     await settle(100);
     expect(h.session.getState().connection.status).toBe("connecting");
     h.micStreams[0]?.tracks[0]?.end();
+    await settle(100);
+    // The connection was offered the dead track and cannot take another yet.
     expect(h.session.getState().mode).toBe("text");
     await settle(600);
     expect(h.session.getState().connection.status).toBe("connected");
@@ -717,7 +723,11 @@ describe("turning the microphone on in a text chat", () => {
   it("replaces a mic that died in a chat that began as voice", async () => {
     const h = await started("voice");
     const dead = h.micStreams[0];
+    // The automatic re-acquire finds no mic, so the chat drops to text.
+    h.setMic("unavailable");
     dead?.tracks[0]?.end();
+    await settle(100);
+    h.setMic("ok");
     expect(h.session.getState()).toMatchObject({
       mode: "text",
       micIssue: "unavailable",
@@ -736,8 +746,9 @@ describe("turning the microphone on in a text chat", () => {
     });
     expect(h.mint).toHaveBeenCalledOnce();
 
-    // The new mic is watched like the first one was.
+    // The new mic is watched like the first one was (and again too soon to retry).
     fresh?.tracks[0]?.end();
+    await settle(100);
     expect(h.session.getState().mode).toBe("text");
     h.session.end();
     h.expectAllReleased();
@@ -1299,32 +1310,14 @@ describe("a flaky link", () => {
     expect(status(h)).toBe("connected");
   });
 
-  it("gives up when the link stays down", async () => {
-    const h = await started("voice");
-    await settle(2000);
-    h.transport.emitState("disconnected");
-    await settle(RECONNECT_GRACE_MS + 100);
-    expect(h.session.getState().connection).toEqual({
-      status: "failed",
-      code: "session_reconnect_failed",
-    });
-    h.expectAllReleased();
-  });
-
-  it("fails at once when the link dies outright", async () => {
-    const h = await started("voice");
-    h.transport.emitState("failed");
-    expect(h.session.getState().connection).toEqual({
-      status: "failed",
-      code: "session_reconnect_failed",
-    });
-    h.expectAllReleased();
-  });
-
   it("keeps the transcript on screen after the link fails", async () => {
     const h = await started("voice", { script: scenarioScript("normal-turn") });
     await settle(3000);
+    // Nothing more can be minted today, so the reconnect ends the chat.
+    h.mint.mockRejectedValue(new MintError("daily_limit"));
     h.transport.emitState("failed");
+    await settle();
+    expect(status(h)).toBe("failed");
     expect(h.session.getState().order).toHaveLength(2);
   });
 });

@@ -1,5 +1,6 @@
 import { AlertCircle } from "lucide-react";
 import { InitialWait, RetryButton } from "@/components/retry-button";
+import { Button } from "@/components/ui/button";
 import { failureMessage, type FailureCode } from "../realtime/failure";
 
 /**
@@ -7,17 +8,31 @@ import { failureMessage, type FailureCode } from "../realtime/failure";
  * budget errors in particular would only repeat. After a 429 the button counts
  * down to the moment a retry can work and stays disabled until then, so a tap
  * cannot spend another attempt against the limit.
+ *
+ * Two failures have a better next step than "Try again":
+ *  - Connection lost (the automatic reconnects ran out): Reconnect, or carry
+ *    on in text.
+ *  - The document expired on the server: load it again from the source the
+ *    page still holds.
  */
 export function FailureCard({
   code,
   retryAt,
   onRetry,
+  onSwitchToText,
+  onReloadSource,
 }: {
   code: FailureCode;
   /** Deadline (ms since epoch) from a 429; undefined = retry right away. */
   retryAt?: number;
   onRetry: () => void;
+  /** Offered with Connection lost. */
+  onSwitchToText?: () => void;
+  /** Offered when the document has expired. */
+  onReloadSource?: () => void;
 }) {
+  const lost = code === "session_reconnect_failed";
+  const expired = code === "doc_not_found" && onReloadSource !== undefined;
   return (
     <div
       data-testid="failure-card"
@@ -38,10 +53,16 @@ export function FailureCard({
       <RetryButton
         key={retryAt}
         retryAt={retryAt}
-        onRetry={onRetry}
+        label={lost ? "Reconnect" : expired ? "Load it again" : "Try again"}
+        onRetry={expired ? onReloadSource : onRetry}
         variant="outline"
         className="h-11"
       />
+      {lost && onSwitchToText && (
+        <Button variant="outline" className="h-11" onClick={onSwitchToText}>
+          Switch to text
+        </Button>
+      )}
     </div>
   );
 }

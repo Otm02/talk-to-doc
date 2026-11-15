@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { encodeNdjsonLine } from "@/lib/wire/ndjson";
-import { IngestError } from "./ingest-error";
+import { IngestError, StreamBrokenError } from "./ingest-error";
 import { readIngestEvents, type IngestEvent } from "./ndjson-reader";
 
 function streamOf(...lines: unknown[]): ReadableStream<Uint8Array> {
@@ -20,12 +20,19 @@ async function collect(gen: AsyncGenerator<IngestEvent>) {
 }
 
 const meta = { documentId: "d", title: "T", sourceType: "pdf", pages: 1 };
-const done = { done: true, stats: { pages: 1, words: 2, tokens: 3 }, coverage: 1 };
+const done = {
+  done: true,
+  stats: { pages: 1, words: 2, tokens: 3 },
+  coverage: 1,
+};
 
 describe("readIngestEvents", () => {
   it("types each line", async () => {
     const events = await collect(
-      readIngestEvents(streamOf(meta, { page: 1, text: "hi" }, done), "upload_failed"),
+      readIngestEvents(
+        streamOf(meta, { page: 1, text: "hi" }, done),
+        "upload_failed",
+      ),
     );
     expect(events.map((e) => e.type)).toEqual(["meta", "page", "done"]);
   });
@@ -46,11 +53,15 @@ describe("readIngestEvents", () => {
     };
     const events = await collect(
       readIngestEvents(
-        streamOf(yt, { segment: { startSec: 0, text: "a" } }, {
-          done: true,
-          stats: { segments: 1, words: 1, tokens: 1 },
-          coverage: 1,
-        }),
+        streamOf(
+          yt,
+          { segment: { startSec: 0, text: "a" } },
+          {
+            done: true,
+            stats: { segments: 1, words: 1, tokens: 1 },
+            coverage: 1,
+          },
+        ),
         "youtube_failed",
       ),
     );
@@ -59,7 +70,12 @@ describe("readIngestEvents", () => {
 
   it("throws the incomplete code when `done` is missing", async () => {
     await expect(
-      collect(readIngestEvents(streamOf(meta, { page: 1, text: "x" }), "upload_failed")),
+      collect(
+        readIngestEvents(
+          streamOf(meta, { page: 1, text: "x" }),
+          "upload_failed",
+        ),
+      ),
     ).rejects.toMatchObject({ code: "upload_failed" });
   });
 
@@ -81,8 +97,95 @@ describe("readIngestEvents", () => {
         c.close();
       },
     });
-    await expect(collect(readIngestEvents(bad, "youtube_failed"))).rejects.toMatchObject({
+    await expect(
+      collect(readIngestEvents(bad, "youtube_failed")),
+    ).rejects.toMatchObject({
       code: "youtube_failed",
     });
+  });
+});
+
+describe("readIngestEvents: a stream that breaks", () => {
+  /** A stream that sends the given lines, then stays quiet (or breaks). */
+  function thenStall(
+    lines: unknown[],
+    end: "quiet" | "break",
+  ): ReadableStream<Uint8Array> {
+    const bytes = new TextEncoder().encode(
+      lines.map(encodeNdjsonLine).join(""),
+    );
+    return new ReadableStream({
+      start(c) {
+        c.enqueue(bytes);
+      },
+      pull(c) {
+        if (end === "break") c.error(new TypeError("network error"));
+        // "quiet": never delivers and never closes.
+        return end === "break" ? undefined : new Promise(() => {});
+      },
+    });
+  }
+
+  it("keeps what arrived, then throws a StreamBrokenError when it goes quiet", async () => {
+    const seen: IngestEvent[] = [];
+    const run = (async () => {
+      for await (const e of readIngestEvents(
+        thenStall([meta, { page: 1, text: "a" }], "quiet"),
+        "upload_failed",
+        50,
+      )) {
+        seen.push(e);
+      }
+    })();
+    await expect(run).rejects.toBeInstanceOf(StreamBrokenError);
+    expect(seen.map((e) => e.type)).toEqual(["meta", "page"]);
+  });
+
+  it("reports the code the caller chose", async () => {
+    const run = collect(
+      readIngestEvents(thenStall([meta], "quiet"), "youtube_failed", 20),
+    );
+    await expect(run).rejects.toMatchObject({
+      code: "youtube_failed",
+      message: "Stream stalled",
+    });
+  });
+
+  it("turns a connection that breaks mid-body into the same error", async () => {
+    const run = collect(
+      readIngestEvents(thenStall([meta], "break"), "upload_failed"),
+    );
+    await expect(run).rejects.toBeInstanceOf(StreamBrokenError);
+  });
+
+  it("is not a 'no answer': a server that died is not an offline device", async () => {
+    const error = await collect(
+      readIngestEvents(streamOf(meta), "upload_failed"),
+    ).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(StreamBrokenError);
+    expect((error as StreamBrokenError).noAnswer).toBe(false);
+  });
+
+  it("an error line the server sent on purpose is not a broken stream", async () => {
+    const run = collect(
+      readIngestEvents(
+        streamOf(meta, { error: { code: "pdf_no_text", message: "x" } }),
+        "upload_failed",
+      ),
+    );
+    const error = await run.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(IngestError);
+    expect(error).not.toBeInstanceOf(StreamBrokenError);
+  });
+
+  it("lets the caller's own abort through unchanged", async () => {
+    const aborting = new ReadableStream<Uint8Array>({
+      pull(c) {
+        c.error(new DOMException("Aborted", "AbortError"));
+      },
+    });
+    await expect(
+      collect(readIngestEvents(aborting, "upload_failed")),
+    ).rejects.toMatchObject({ name: "AbortError" });
   });
 });

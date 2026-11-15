@@ -24,7 +24,18 @@ describe("statusInfo", () => {
     [connected({ activity: "thinking" }), "Thinking"],
     [connected({ activity: "assistantSpeaking" }), "Speaking"],
     [connected({ muted: true, activity: "assistantSpeaking" }), "Muted"],
-    [s({ connection: { status: "reconnecting", since: 0 } }), "Reconnecting"],
+    [
+      s({
+        connection: {
+          status: "reconnecting",
+          since: 0,
+          phase: "grace",
+          attempt: 0,
+          maxAttempts: 3,
+        },
+      }),
+      "Reconnecting",
+    ],
     [s({ connection: { status: "ended", reason: "user" } }), "Ended"],
   ])("names the state %#", (state, label) => {
     expect(statusInfo(state).label).toBe(label);
@@ -39,7 +50,17 @@ describe("statusInfo", () => {
   it("tracks live and in-progress", () => {
     expect(isLive(connected())).toBe(true);
     expect(
-      isLive(s({ connection: { status: "reconnecting", since: 0 } })),
+      isLive(
+        s({
+          connection: {
+            status: "reconnecting",
+            since: 0,
+            phase: "grace",
+            attempt: 0,
+            maxAttempts: 3,
+          },
+        }),
+      ),
     ).toBe(true);
     expect(isInProgress(s({ connection: { status: "requestingMic" } }))).toBe(
       true,
@@ -131,8 +152,77 @@ describe("a failed chat says why, honestly", () => {
       "Listening",
     );
     expect(
-      statusInfo(s({ connection: { status: "reconnecting", since: 0 } }), false)
-        .label,
+      statusInfo(
+        s({
+          connection: {
+            status: "reconnecting",
+            since: 0,
+            phase: "grace",
+            attempt: 0,
+            maxAttempts: 3,
+          },
+        }),
+        false,
+      ).label,
     ).toBe("Reconnecting");
+  });
+});
+
+describe("while reconnecting", () => {
+  const rc = (
+    phase:
+      | "grace"
+      | "waitingNetwork"
+      | "backoff"
+      | "minting"
+      | "connecting"
+      | "cooldown",
+    attempt = 1,
+  ) =>
+    s({
+      connection: {
+        status: "reconnecting",
+        since: 0,
+        phase,
+        attempt,
+        maxAttempts: 3,
+      },
+    });
+
+  it.each(["grace", "backoff", "minting", "connecting"] as const)(
+    "says plain Reconnecting in %s: the attempt count is in the notice line, not the pill",
+    (phase) => {
+      expect(statusInfo(rc(phase, phase === "grace" ? 0 : 2))).toMatchObject({
+        kind: "reconnecting",
+        label: "Reconnecting",
+      });
+    },
+  );
+
+  it("says Offline, not Reconnecting, while it waits for the network", () => {
+    expect(statusInfo(rc("waitingNetwork"))).toMatchObject({
+      kind: "offline",
+      label: "Offline",
+    });
+  });
+
+  it("says Cooldown after a 429, the same word as any other 429", () => {
+    expect(statusInfo(rc("cooldown"))).toMatchObject({
+      kind: "cooldown",
+      label: "Cooldown",
+    });
+  });
+
+  it("says Offline while the first start waits for the connection", () => {
+    expect(
+      statusInfo(
+        s({ connection: { status: "connecting", phase: "waitingNetwork" } }),
+      ).label,
+    ).toBe("Offline");
+  });
+
+  it("stays live for the chrome around it", () => {
+    expect(isLive(rc("cooldown"))).toBe(true);
+    expect(isInProgress(rc("waitingNetwork"))).toBe(true);
   });
 });

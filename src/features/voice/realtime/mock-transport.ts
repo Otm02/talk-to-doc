@@ -27,6 +27,8 @@ export interface MockScript {
   failWith?: TransportErrorKind;
   /** Timed events, e.g. a user speaking or a scripted barge-in. */
   steps: MockStep[];
+  /** Timed changes of the media path, after the session is created. */
+  linkSteps?: { at: number; state: TransportState }[];
   /** Reply for typed messages. Default: a short fixed sentence. */
   textAnswer?: string;
   /** Whether replies to response.create stream as audio (voice) or text. */
@@ -138,6 +140,9 @@ export class MockTransport implements RealtimeTransport {
         resolve();
         for (const step of this.script.steps) {
           this.later(step.at, () => this.deliver(step.event));
+        }
+        for (const step of this.script.linkSteps ?? []) {
+          this.later(step.at, () => this.setState(step.state));
         }
       });
     });

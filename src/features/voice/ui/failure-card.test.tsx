@@ -138,3 +138,55 @@ describe("FailureCard", () => {
     expect(button()).toHaveTextContent("Try again in 7h 12m");
   });
 });
+
+describe("FailureCard: what to do next", () => {
+  it("Connection lost offers Reconnect and Switch to text, and both work", () => {
+    const onRetry = vi.fn();
+    const onSwitchToText = vi.fn();
+    render(
+      <FailureCard
+        code="session_reconnect_failed"
+        onRetry={onRetry}
+        onSwitchToText={onSwitchToText}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Connection lost.");
+    expect(button()).toHaveTextContent(/^Reconnect$/);
+    fireEvent.click(button());
+    fireEvent.click(screen.getByRole("button", { name: "Switch to text" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onSwitchToText).toHaveBeenCalledTimes(1);
+  });
+
+  it("Switch to text is only offered for Connection lost", () => {
+    render(
+      <FailureCard
+        code="session_connect_failed"
+        onRetry={vi.fn()}
+        onSwitchToText={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Switch to text" })).toBeNull();
+  });
+
+  it("an expired document offers Load it again, which reloads the source", () => {
+    const onRetry = vi.fn();
+    const onReloadSource = vi.fn();
+    render(
+      <FailureCard
+        code="doc_not_found"
+        onRetry={onRetry}
+        onReloadSource={onReloadSource}
+      />,
+    );
+    expect(button()).toHaveTextContent(/^Load it again$/);
+    fireEvent.click(button());
+    expect(onReloadSource).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
+  it("an expired document without a source to reload keeps the plain retry", () => {
+    render(<FailureCard code="doc_not_found" onRetry={vi.fn()} />);
+    expect(button()).toHaveTextContent(/^Try again$/);
+  });
+});
