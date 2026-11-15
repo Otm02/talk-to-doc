@@ -53,6 +53,9 @@ function failedInfo(code: FailureCode, online: boolean): PillInfo {
       return { kind: "offline", label: "Offline", tone: "error" };
     case "voice_disabled":
     case "budget_exhausted":
+    // Our own limiter's store did not answer: not the chat's fault, and it
+    // clears by itself.
+    case "service_busy":
       return { kind: "unavailable", label: "Unavailable", tone: "warning" };
     default:
       return { kind: "notConnected", label: "Not connected", tone: "error" };

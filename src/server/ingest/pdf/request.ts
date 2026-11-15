@@ -1,8 +1,8 @@
 import "server-only";
 import { BlobIngestBodySchema } from "@/lib/wire/ingest";
 import { EnvError, getEnv, type Env } from "../../env";
-import { catalogError } from "../../errors";
-import { parseWith } from "../../http";
+import type { RequestMeta } from "../../http";
+import { MAX_BLOB_INGEST_BODY_BYTES, parseJsonBody } from "../../body";
 import { enforceRateLimit } from "../../security/rate-limit";
 import { getState } from "../../state";
 import { deleteBlob, parseOwnBlobUrl, readBlob } from "./blob";
@@ -21,7 +21,8 @@ import { assertPdfBytes } from "./validate";
  */
 export async function ingestPdf(
   req: Request,
-  requestId: string,
+  _requestId: string,
+  meta: RequestMeta = {},
 ): Promise<Response> {
   const startedAt = Date.now();
   const env = getEnv();
@@ -45,7 +46,9 @@ export async function ingestPdf(
     store: getState().documents,
     contextTokenBudget: env.contextTokenBudget,
     ttlMs: env.docTtlMinutes * 60_000,
-    requestId,
+    onError: (code) => {
+      meta.code = code;
+    },
   });
   return new Response(stream, {
     headers: {
@@ -72,11 +75,10 @@ async function readFromBlob(
       "BLOB_READ_WRITE_TOKEN is required when UPLOAD_MODE=blob",
     ]);
   }
-  const body = parseWith(
+  const body = await parseJsonBody(
+    req,
     BlobIngestBodySchema,
-    await req.json().catch(() => {
-      throw catalogError("invalid_request");
-    }),
+    MAX_BLOB_INGEST_BODY_BYTES,
   );
   const blob = parseOwnBlobUrl(body.blobUrl, env.blobToken);
   try {

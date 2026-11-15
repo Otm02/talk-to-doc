@@ -269,15 +269,14 @@ describe("deleteBlob", () => {
     );
   });
 
-  it("swallows a failure and logs only the path", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("swallows a failure and logs nothing", async () => {
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     delMock.mockRejectedValue(new Error(`boom ${TOKEN}`));
     await expect(deleteBlob(own, TOKEN)).resolves.toBeUndefined();
-    expect(log).toHaveBeenCalledWith(
-      "[blob] delete failed",
-      "/uploads/report-Ab12Cd.pdf",
-      expect.any(Error),
-    );
-    expect(log.mock.calls[0]?.[1]).not.toContain("teststore");
+    expect(error).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalled();
   });
 });

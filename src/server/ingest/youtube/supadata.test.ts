@@ -72,6 +72,35 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("SupadataProvider: the credit guard", () => {
+  it("asks before it spends anything, and a refusal means no request at all", async () => {
+    const { mock } = stubFetch({
+      supadata: () => json(transcriptBody),
+      oembed: okOembed,
+    });
+    const refuse = new TranscriptError("PROVIDER_QUOTA");
+    const guarded = createSupadataProvider({
+      apiKey: KEY,
+      beforeRequest: async () => {
+        throw refuse;
+      },
+    });
+    await expect(guarded.fetch(ID, "en", signal())).rejects.toBe(refuse);
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it("goes ahead when the guard lets it", async () => {
+    stubFetch({ supadata: () => json(transcriptBody), oembed: okOembed });
+    const beforeRequest = vi.fn(async () => undefined);
+    const result = await createSupadataProvider({
+      apiKey: KEY,
+      beforeRequest,
+    }).fetch(ID, "en", signal());
+    expect(beforeRequest).toHaveBeenCalledOnce();
+    expect(result.segments).toHaveLength(2);
+  });
+});
+
 describe("SupadataProvider: success", () => {
   it("maps the response and takes title and channel from oEmbed", async () => {
     stubFetch({ supadata: () => json(transcriptBody), oembed: okOembed });

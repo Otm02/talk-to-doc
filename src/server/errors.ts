@@ -2,9 +2,14 @@ import "server-only";
 import { ZodError } from "zod";
 import { ERROR_CATALOG, type CatalogCode } from "@/lib/errors/catalog";
 import { EnvError } from "./env";
+import { LimiterUnavailableError } from "./state/types";
 
 export type ErrorCode =
-  "config_invalid" | "not_found" | "upstream_failed" | CatalogCode;
+  | "config_invalid"
+  | "not_found"
+  | "unauthorized"
+  | "upstream_failed"
+  | CatalogCode;
 
 export class AppError extends Error {
   constructor(
@@ -74,6 +79,9 @@ export function toErrorResult(err: unknown, requestId: string): ErrorResult {
       ...(wait !== undefined && { headers: { "retry-after": String(wait) } }),
     };
   }
+  if (err instanceof LimiterUnavailableError) {
+    return catalogResult("service_busy", requestId);
+  }
   if (err instanceof ZodError) {
     return catalogResult("invalid_request", requestId);
   }
@@ -88,6 +96,11 @@ export function toErrorResult(err: unknown, requestId: string): ErrorResult {
     };
   }
   return catalogResult("internal", requestId);
+}
+
+/** The `error` object a client may see for anything thrown. Never carries a message or stack. */
+export function publicError(err: unknown): ErrorBody["error"] {
+  return toErrorResult(err, "").body.error;
 }
 
 function catalogResult(code: CatalogCode, requestId: string): ErrorResult {

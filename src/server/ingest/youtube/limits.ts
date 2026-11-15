@@ -3,6 +3,11 @@ import type { RateRule } from "../../state";
 
 export const YOUTUBE_INGEST_RATE: RateRule = { max: 10, windowMs: 60_000 };
 
+// Supadata's free plan is 100 credits a month and a lookup costs one. Counters
+// here are per UTC day, so 3 a day keeps a 31-day month at 93 at most.
+export const SUPADATA_DAILY_KEY = "supadata-lookups";
+export const SUPADATA_DAILY_CAP = 3;
+
 // Cached by video and language so repeated tests and demos do not spend
 // Supadata credits (100 a month on the free plan).
 export const TRANSCRIPT_CACHE_TTL_MS = 60 * 60_000;

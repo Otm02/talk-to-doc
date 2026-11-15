@@ -74,7 +74,14 @@ function post(body: unknown, headers: Record<string, string> = IP) {
 }
 
 const run = (chain: TranscriptChain, req: Request) =>
-  handle((r, id) => ingestYoutube(r, id, { chain }))(req);
+  handle("ingest-youtube", (r, _id, meta) =>
+    ingestYoutube(r, {
+      chain,
+      onProvider: (provider) => {
+        meta.provider = provider;
+      },
+    }),
+  )(req);
 
 async function readLines(res: Response): Promise<IngestLine[]> {
   if (!res.body) throw new Error("no body");
@@ -305,7 +312,6 @@ describe("ingestYoutube: the transcript cache", () => {
   });
 
   it("still ingests when the cache cannot be written", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const real = holder.state?.documents;
     if (!real || !holder.state) throw new Error("no state");
     holder.state = {
@@ -430,26 +436,51 @@ describe("ingestYoutube: refusals happen before the stream", () => {
 });
 
 describe("ingestYoutube: logging", () => {
-  it("logs the provider and counts, never transcript text or the raw URL", async () => {
+  it("logs the route, status and provider, and nothing about the video", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { chain } = fakeChain(transcriptOf(10), {
       provider: "supadata",
       attempts: [{ provider: "direct", code: "BLOCKED" }],
     });
-    await run(chain, post({ url: `${URL_OK}&si=tracking-token` }));
+    const res = await run(chain, post({ url: `${URL_OK}&si=tracking-token` }));
+    // A streamed response is logged when its body ends.
+    await res.text();
 
     expect(info).toHaveBeenCalledTimes(1);
     const line = String(info.mock.calls[0]?.[0]);
-    expect(JSON.parse(line)).toMatchObject({
-      event: "youtube_ingest",
-      videoId: "dQw4w9WgXcQ",
+    const logged = JSON.parse(line);
+    expect(Object.keys(logged).sort()).toEqual([
+      "durationMs",
+      "provider",
+      "requestId",
+      "route",
+      "status",
+    ]);
+    expect(logged).toMatchObject({
+      route: "ingest-youtube",
+      status: 200,
       provider: "supadata",
-      cached: false,
-      attempts: [{ provider: "direct", code: "BLOCKED" }],
-      segments: 2,
     });
-    expect(line).not.toContain("alpha");
-    expect(line).not.toContain("A long talk");
-    expect(line).not.toContain("tracking-token");
+    for (const forbidden of [
+      "alpha",
+      "A long talk",
+      "tracking-token",
+      "dQw4w9WgXcQ",
+    ]) {
+      expect(line).not.toContain(forbidden);
+    }
+  });
+
+  it("logs a refused request without a provider", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { chain } = fakeChain(transcriptOf(1));
+    await run(chain, post({ url: "https://example.com/watch?v=dQw4w9WgXcQ" }));
+    const logged = JSON.parse(String(info.mock.calls[0]?.[0]));
+    expect(logged).toMatchObject({
+      route: "ingest-youtube",
+      status: 400,
+      code: "youtube_bad_url",
+    });
+    expect(logged).not.toHaveProperty("provider");
   });
 });

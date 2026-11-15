@@ -7,7 +7,7 @@ import type {
 } from "@/lib/wire/ingest";
 import { encodeNdjsonLine } from "@/lib/wire/ndjson";
 import { capToTokenBudget, countTokens } from "../../context/budget";
-import { catalogError, toErrorResult } from "../../errors";
+import { catalogError, publicError, type ErrorCode } from "../../errors";
 import type { DocumentStore } from "../../state";
 import type { PdfDocumentRecord } from "../record";
 import type { OpenPdf } from "./extract";
@@ -26,7 +26,8 @@ export interface PdfStreamOptions {
   store: DocumentStore;
   contextTokenBudget: number;
   ttlMs: number;
-  requestId: string;
+  /** Told why the stream failed, for the request log. Never the message. */
+  onError?: (code: ErrorCode) => void;
   now?: () => number;
 }
 
@@ -50,7 +51,7 @@ const flushToNetwork = () =>
 export function createPdfIngestStream(
   options: PdfStreamOptions,
 ): ReadableStream<Uint8Array> {
-  const { doc, requestId } = options;
+  const { doc } = options;
   const pages: string[] = [];
   let finished = false;
 
@@ -88,9 +89,10 @@ export function createPdfIngestStream(
       } catch (err) {
         finished = true;
         // Same mapping as the JSON error path: AppError copy or a generic message.
-        const { body } = toErrorResult(err, requestId);
-        console.error(`[${requestId}] ${body.error.code}`, err);
-        write(controller, { error: body.error });
+        // Not logged with its text: pdf.js messages can quote the document.
+        const error = publicError(err);
+        options.onError?.(error.code);
+        write(controller, { error });
         controller.close();
         await doc.close();
       }

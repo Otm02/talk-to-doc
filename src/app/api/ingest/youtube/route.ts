@@ -6,4 +6,10 @@ import { ingestYoutube } from "@/server/ingest/youtube/request";
 // cacheComponents.
 export const maxDuration = 60;
 
-export const POST = handle((req, requestId) => ingestYoutube(req, requestId));
+export const POST = handle("ingest-youtube", (req, _requestId, meta) =>
+  ingestYoutube(req, {
+    onProvider: (provider) => {
+      meta.provider = provider;
+    },
+  }),
+);

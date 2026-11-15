@@ -195,7 +195,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - Chat panel on `/d/[id]` per SPEC §3.3 and §3.4: **Start Voice Chat**, status pill, mic level meter (AnalyserNode), Mute/Unmute, Stop speaking, End, Type instead.
 - Transcript as an `aria-live="polite"` log with auto-scroll and Jump to latest; interrupted marker.
 - Text mode composer pinned above the keyboard using `visualViewport`; automatic switch on `mic_denied`, `mic_not_found` and `mic_in_use`.
-- Session timer with the 1-minute warning; every session and budget error card from SPEC §4.2 and §4.3; Start disabled up front when `/api/limits` reports a trip.
+- Session timer with the 1-minute warning; every session and budget error card from SPEC §4.2 and §4.3; A tripped guard shows when Start is tapped (no `/api/limits` route).
 - e2e builds use `NEXT_PUBLIC_REALTIME_TRANSPORT=mock`.
 - **[LIVE: ask first, ~$0.10]** phone check on a preview: ask, interrupt, follow up (MC-3). Also settle what M6 deferred: a text-mode session (receive-only audio offer, `output_modalities: ["text"]` reply), the `/calls` success status and `Location`, and the billing error shape; update reference §2 and §3.
 
@@ -274,7 +274,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 **Acceptance criteria**
 - [ ] Every threat T-01 to T-16 has a passing test or a documented CI check.
 - [ ] Contract suite passes against memory in CI and against Upstash locally.
-- [ ] A burst of 30 mint requests from one IP gets 5 secrets and then `rate_limited`.
+- [ ] A burst of 30 mint requests from one IP gets 15 secrets and then `rate_limited` (the per-IP mint limit is 15 per 10 minutes since M8).
 
 **Tests**
 - [ ] `*.contract.test.ts` for Upstash adapters (local only).

@@ -16,9 +16,7 @@ describe("GET /api/health", () => {
     expect(body).toEqual({
       ok: true,
       version: expect.any(String),
-      model: "gpt-realtime-2.1-mini",
       uploadMode: "direct",
-      state: "memory",
     });
     expect(JSON.stringify(body)).not.toContain("sk-test");
   });

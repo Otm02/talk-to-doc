@@ -1,0 +1,4 @@
+{
+  "buildCommand": "pnpm build && pnpm check:bundle",
+  "crons": [{ "path": "/api/cron/cleanup", "schedule": "0 3 * * *" }]
+}

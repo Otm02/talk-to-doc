@@ -21,6 +21,12 @@ export const ERROR_CATALOG = {
     status: 503,
     message: "Voice is paused right now; the extracted text still works.",
   },
+  // The limiter could not answer (Upstash down or slow). Requests are refused
+  // rather than let through unchecked.
+  service_busy: {
+    status: 503,
+    message: "We're busy right now. Try again in a moment.",
+  },
   daily_limit: {
     status: 429,
     message: "The demo's voice sessions for today are used up.",

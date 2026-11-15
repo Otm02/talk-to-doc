@@ -226,6 +226,7 @@ describe("POST /api/ingest/youtube (Direct blocked, Supadata behind it)", () => 
       }),
     );
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    info.mockClear();
 
     const lines = await readLines(await post({ url: MANUAL }));
     expect(lines[0]).toMatchObject({
@@ -240,8 +241,9 @@ describe("POST /api/ingest/youtube (Direct blocked, Supadata behind it)", () => 
 
     const logged = JSON.parse(String(info.mock.calls[0]?.[0]));
     expect(logged).toMatchObject({
+      route: "ingest-youtube",
+      status: 200,
       provider: "supadata",
-      attempts: [{ provider: "direct", code: "BLOCKED" }],
     });
     expect(JSON.stringify(logged)).not.toContain("elephants");
   });

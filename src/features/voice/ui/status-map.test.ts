@@ -110,6 +110,7 @@ describe("a failed chat says why, honestly", () => {
     "daily_limit",
     "budget_exhausted",
     "voice_disabled",
+    "service_busy",
     "session_connect_failed",
     "session_upstream_busy",
     "doc_not_found",
@@ -128,10 +129,13 @@ describe("a failed chat says why, honestly", () => {
     },
   );
 
-  it.each(["voice_disabled", "budget_exhausted"] as const)(
-    "calls %s unavailable",
+  it.each(["voice_disabled", "budget_exhausted", "service_busy"] as const)(
+    "calls %s unavailable, as a warning",
     (code) => {
-      expect(statusInfo(failed(code)).label).toBe("Unavailable");
+      expect(statusInfo(failed(code))).toMatchObject({
+        label: "Unavailable",
+        tone: "warning",
+      });
     },
   );
 

@@ -19,7 +19,17 @@ export const EXTRACT_TIMEOUT_MS = 55_000;
 export const MAX_CONCURRENT_EXTRACTIONS = 2;
 
 export const INGEST_RATE: RateRule = { max: 10, windowMs: 60_000 };
-export const UPLOAD_TOKEN_RATE: RateRule = { max: 10, windowMs: 60_000 };
+// Every token is one Blob upload, and Hobby's Blob allowance (2,000 advanced
+// operations a month, 1 GB) locks the store for up to 30 days when it is
+// used up. So uploads are scarce: a few an hour per client (an IPv6 client is a
+// whole /64), and a hard ceiling per UTC day for everyone together.
+export const UPLOAD_TOKEN_RATE: RateRule = { max: 20, windowMs: 3_600_000 };
+export const DAILY_UPLOAD_KEY = "upload-tokens";
+export const DAILY_UPLOAD_CAP = 150;
+
+/** Uploads older than this that nobody ingested are leftovers. */
+export const ORPHAN_UPLOAD_AGE_MS = 60 * 60_000;
+export const CRON_RATE: RateRule = { max: 5, windowMs: 60_000 };
 
 export const BLOB_TOKEN_TTL_MS = 5 * 60_000;
 export const BLOB_DELETE_TIMEOUT_MS = 10_000;

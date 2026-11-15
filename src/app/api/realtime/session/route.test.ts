@@ -476,6 +476,23 @@ describe("gates", () => {
     expect(await dailyCount()).toBe(2);
   });
 
+  it("DAILY_LIMIT: two starts at the last slot at once get one secret, not two", async () => {
+    vi.stubEnv("DAILY_SESSION_CAP", "1");
+    resetEnvCacheForTests();
+
+    // Both pass the early check (the count is still 0) and both reach OpenAI.
+    const [a, b] = await Promise.all([
+      post({ documentId: PDF_ID }),
+      post({ documentId: PDF_ID }),
+    ]);
+
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 429]);
+    const loser = a.status === 429 ? a : b;
+    await expectError(loser, "daily_limit");
+    expect(await dailyCount()).toBe(1);
+  });
+
   it("DAILY_LIMIT: a cap of 0 refuses everything", async () => {
     vi.stubEnv("DAILY_SESSION_CAP", "0");
     resetEnvCacheForTests();
@@ -754,8 +771,21 @@ describe("logging", () => {
       }),
     );
 
-    expect(logged).toContain("session_minted");
+    // One access line, with exactly the allowed fields.
+    const lines = logs.filter((l) => l.startsWith("{"));
+    expect(lines).toHaveLength(1);
+    expect(Object.keys(JSON.parse(lines[0] ?? "")).sort()).toEqual([
+      "durationMs",
+      "requestId",
+      "route",
+      "status",
+    ]);
+    expect(JSON.parse(lines[0] ?? "")).toMatchObject({
+      route: "session",
+      status: 200,
+    });
     for (const forbidden of [
+      PDF_ID,
       SECRET,
       API_KEY,
       "ZEBRA-CRYPTO-MARKER",

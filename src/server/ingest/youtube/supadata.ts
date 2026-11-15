@@ -48,6 +48,11 @@ const AcceptedSchema = z.object({ jobId: z.string() });
 
 export interface SupadataOptions {
   apiKey: string;
+  /**
+   * Called before anything that costs a credit. It throws to refuse (the
+   * monthly allowance is guarded outside, where the shared counters are).
+   */
+  beforeRequest?: () => Promise<void>;
 }
 
 export function createSupadataProvider(
@@ -58,6 +63,11 @@ export function createSupadataProvider(
   return {
     name: "supadata",
     async fetch(videoId, preferredLang, signal): Promise<Transcript> {
+      if (options.beforeRequest) {
+        await options.beforeRequest();
+        // The visitor may have left while we counted: do not spend a credit.
+        signal.throwIfAborted();
+      }
       // Title and channel are not in Supadata's answer; ask in parallel.
       const info = fetchVideoInfo(videoId, signal);
 

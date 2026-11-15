@@ -54,8 +54,7 @@ export async function readCachedTranscript(
     if (stored === null) return null;
     const parsed = CachedSchema.safeParse(stored);
     return parsed.success ? parsed.data : null;
-  } catch (err) {
-    console.warn("youtube cache read failed", err);
+  } catch {
     return null;
   }
 }
@@ -79,8 +78,7 @@ export async function writeCachedTranscript(
   try {
     await store.put(cacheKey(videoId, preferredLang), value, ttlMs);
     return true;
-  } catch (err) {
-    console.warn("youtube cache write failed", err);
+  } catch {
     return false;
   }
 }
