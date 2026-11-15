@@ -125,6 +125,10 @@ const ANSWER_1 = [
 ];
 const ANSWER_2 = ["Margins ", "were ", "forty ", "percent."];
 const SHORT = ["Revenue ", "grew ", "twelve ", "percent ", "last ", "year."];
+// Cites pages the way the instructions ask for. Page 40 is past the end of
+// any test document, so it must stay plain text.
+const GROUNDED =
+  "Revenue is on page 2, and the outlook is on pages 3 to 4. Page 40 is not in this report.";
 
 function normalTurn(opts: {
   transcribeAt: number;
@@ -267,6 +271,28 @@ export function scenarioScript(name: MockScenarioName): MockScript {
           ),
         ],
         replyWith: "audio",
+      };
+
+    case "grounding":
+      return {
+        steps: [
+          ...userSpeech({
+            t: 300,
+            id: "u1",
+            prev: null,
+            transcribeAt: 1000,
+            text: "Where is revenue covered? ",
+          }),
+          ...assistantAnswer({
+            t: 1100,
+            r: "r1",
+            a: "a1",
+            prev: "u1",
+            words: GROUNDED.split(/(?<=\s)/),
+          }).steps,
+        ],
+        replyWith: "audio",
+        textAnswer: GROUNDED,
       };
 
     default: {

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { MintError, mintSession, parseRetryAfter } from "./mint";
+import {
+  MintError,
+  mintSession,
+  parseRetryAfter,
+  retryAfterFrom,
+} from "./mint";
 
 const OK = {
   clientSecret: "ek_test_not_a_real_secret",
@@ -85,12 +90,12 @@ describe("mintSession", () => {
     ).rejects.toBeInstanceOf(MintError);
   });
 
-  it("turns a network failure into a connect failure", async () => {
+  it("names a request that never got an answer a network failure", async () => {
     await expect(
       mint(() => {
         throw new TypeError("Failed to fetch");
       }),
-    ).rejects.toMatchObject({ code: "session_connect_failed" });
+    ).rejects.toMatchObject({ code: "session_network_failed" });
   });
 
   it("lets our own abort through untouched", async () => {
@@ -123,6 +128,41 @@ describe("Retry-After on a rate limit", () => {
     });
   });
 
+  it("prefers retryAfterSec from the body over the header", async () => {
+    const res = () =>
+      new Response(
+        JSON.stringify({ error: { code: "rate_limited", retryAfterSec: 538 } }),
+        { status: 429, headers: { "retry-after": "72" } },
+      );
+    await expect(mint(res)).rejects.toMatchObject({
+      code: "rate_limited",
+      retryAfterSeconds: 538,
+    });
+  });
+
+  it("reads the body alone when a proxy dropped the header", async () => {
+    const res = () =>
+      new Response(
+        JSON.stringify({
+          error: { code: "daily_limit", retryAfterSec: 30_000 },
+        }),
+        { status: 429 },
+      );
+    await expect(mint(res)).rejects.toMatchObject({
+      code: "daily_limit",
+      retryAfterSeconds: 30_000,
+    });
+  });
+
+  it("falls back to the header when the body value is unusable", () => {
+    expect(retryAfterFrom(undefined, "42")).toBe(42);
+    expect(retryAfterFrom(Number.NaN, "42")).toBe(42);
+    expect(retryAfterFrom(2.2, null)).toBe(3);
+    // A day at most, even if the body says more.
+    expect(retryAfterFrom(999_999, null)).toBe(86_400);
+    expect(retryAfterFrom(undefined, null)).toBeUndefined();
+  });
+
   it("has no wait when the header is missing", async () => {
     const err = await limited().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(MintError);
@@ -153,5 +193,39 @@ describe("Retry-After on a rate limit", () => {
         }),
     ).catch((e: unknown) => e);
     expect((err as MintError).retryAfterSeconds).toBeUndefined();
+  });
+
+  describe("history", () => {
+    const turn = (i: number) => ({
+      role: i % 2 ? ("assistant" as const) : ("user" as const),
+      text: `turn ${i}`,
+    });
+    const sent = (f: ReturnType<typeof vi.fn>) =>
+      JSON.parse(String((f.mock.calls[0] as [string, RequestInit])[1].body));
+
+    it("sends no history key when there is none", async () => {
+      const f = vi.fn(async () => json(OK));
+      await mintSession("doc-1", new AbortController().signal, f as never, []);
+      expect(sent(f)).toEqual({ documentId: "doc-1" });
+    });
+
+    it("sends the newest 30 turns, each cut to the server's limit, skipping blanks", async () => {
+      const f = vi.fn(async () => json(OK));
+      const turns = [
+        ...Array.from({ length: 40 }, (_, i) => turn(i)),
+        { role: "user" as const, text: "   " },
+        { role: "assistant" as const, text: "x".repeat(5000) },
+      ];
+      await mintSession(
+        "doc-1",
+        new AbortController().signal,
+        f as never,
+        turns,
+      );
+      const body = sent(f);
+      expect(body.history).toHaveLength(30);
+      expect(body.history.at(-1).text).toHaveLength(4000);
+      expect(body.history[0]).toEqual(turn(11));
+    });
   });
 });

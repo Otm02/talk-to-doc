@@ -26,6 +26,7 @@ Open http://localhost:3000 (best at 390x844). `GET /api/health` shows the active
 | `pnpm test:e2e`                | Playwright at 390x844 (Chromium and WebKit) |
 | `pnpm format`                  | Prettier                                    |
 | `pnpm fixtures`                | Regenerate the test PDFs in `test/fixtures` |
+| `pnpm icons`                   | Redraw the app icons (uses Playwright)      |
 
 Tests and CI never call the live OpenAI API, YouTube or Supadata. The YouTube tests serve responses recorded once by `scripts/record-youtube-fixtures.ts` (see `test/fixtures/README.md`).
 

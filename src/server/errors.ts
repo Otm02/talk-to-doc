@@ -12,7 +12,7 @@ export class AppError extends Error {
     readonly userMessage: string,
     readonly httpStatus: number,
     readonly cause?: unknown,
-    /** Sent as the Retry-After header on 429s. */
+    /** Sent on 429s, as the Retry-After header and as error.retryAfterSec. */
     readonly retryAfterSeconds?: number,
   ) {
     super(userMessage);
@@ -36,7 +36,12 @@ export function catalogError(
 }
 
 export interface ErrorBody {
-  error: { code: ErrorCode; message: string };
+  error: {
+    code: ErrorCode;
+    message: string;
+    /** Whole seconds until a retry can work. On every 429. */
+    retryAfterSec?: number;
+  };
   requestId: string;
 }
 
@@ -52,12 +57,21 @@ export interface ErrorResult {
  */
 export function toErrorResult(err: unknown, requestId: string): ErrorResult {
   if (err instanceof AppError) {
+    const wait = err.retryAfterSeconds;
     return {
       status: err.httpStatus,
-      body: { error: { code: err.code, message: err.userMessage }, requestId },
-      ...(err.retryAfterSeconds !== undefined && {
-        headers: { "retry-after": String(err.retryAfterSeconds) },
-      }),
+      body: {
+        error: {
+          code: err.code,
+          message: err.userMessage,
+          // In the body as well as the header: fetch() hides Retry-After
+          // from some cross-origin and service-worker setups, and the client
+          // countdown needs the number either way.
+          ...(wait !== undefined && { retryAfterSec: wait }),
+        },
+        requestId,
+      },
+      ...(wait !== undefined && { headers: { "retry-after": String(wait) } }),
     };
   }
   if (err instanceof ZodError) {

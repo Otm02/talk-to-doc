@@ -1,4 +1,5 @@
 import { z } from "zod";
+import "@/lib/zod-jitless";
 
 // Shapes that cross the wire for ingestion. No `server-only` import: the
 // client validates the same schemas when it reads the NDJSON stream (M4).

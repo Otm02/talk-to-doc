@@ -30,6 +30,8 @@ const noop = () => {};
 export class WebRtcTransport implements RealtimeTransport {
   private pc: RTCPeerConnection | null = null;
   private dc: RTCDataChannel | null = null;
+  /** The one audio sender: the mic's in voice mode, empty in text mode. */
+  private sender: RTCRtpSender | null = null;
   private abort: AbortController | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private state: TransportState = "idle";
@@ -63,6 +65,20 @@ export class WebRtcTransport implements RealtimeTransport {
     if (this.dc?.readyState !== "open") return false;
     try {
       this.dc.send(JSON.stringify(event));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async upgradeMic(stream: MediaStream): Promise<boolean> {
+    const sender = this.sender;
+    const track = stream.getAudioTracks()[0];
+    if (!sender || !track || this.state !== "connected") return false;
+    try {
+      // The audio m-line was negotiated as sendrecv from the start, so
+      // swapping the track needs no new offer and no new client secret.
+      await sender.replaceTrack(track);
       return true;
     } catch {
       return false;
@@ -146,10 +162,16 @@ export class WebRtcTransport implements RealtimeTransport {
 
     const track = options.micStream?.getAudioTracks()[0];
     if (options.micStream && track) {
-      pc.addTrack(track, options.micStream);
+      this.sender = pc.addTrack(track, options.micStream);
     } else {
-      // Text mode still needs an audio m-line in the offer to receive replies.
-      pc.addTransceiver("audio", { direction: "recvonly" });
+      // Text mode still needs an audio m-line in the offer to receive
+      // replies. It is sendrecv with an empty sender, not recvonly, so a mic
+      // can be attached later (upgradeMic) on this same connection: asking
+      // for a second client secret just to add a microphone is what locked a
+      // real phone out of the per-IP limit.
+      this.sender = pc.addTransceiver("audio", {
+        direction: "sendrecv",
+      }).sender;
     }
 
     // Created before the offer, or the channel is not part of the SDP.
@@ -164,7 +186,8 @@ export class WebRtcTransport implements RealtimeTransport {
     };
     dc.onclose = () => {
       if (this.closed) return;
-      if (this.failConnect) this.failConnect(new TransportError("network"));
+      // The far side hung up: not proof that our network is down.
+      if (this.failConnect) this.failConnect(new TransportError("rejected"));
       else this.fail();
     };
 
@@ -240,7 +263,9 @@ export class WebRtcTransport implements RealtimeTransport {
   private normalize(err: unknown): TransportError {
     if (this.closed) return new TransportError("aborted");
     if (err instanceof TransportError) return err;
-    return new TransportError("network");
+    // Anything else (a bad SDP answer, createOffer throwing) is not a network
+    // outage, and "network" would label it Offline.
+    return new TransportError("rejected");
   }
 
   private setState(next: TransportState): void {
@@ -262,6 +287,7 @@ export class WebRtcTransport implements RealtimeTransport {
     const { dc, pc } = this;
     this.dc = null;
     this.pc = null;
+    this.sender = null;
     if (dc) {
       dc.onopen = null;
       dc.onmessage = null;

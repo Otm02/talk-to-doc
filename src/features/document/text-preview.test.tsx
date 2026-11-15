@@ -3,6 +3,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DocumentData } from "@/features/ingest/ingest-state";
+import { FullTextSheet, HIGHLIGHT_MS } from "./full-text-sheet";
+import { buildGroups } from "./text-groups";
 import { TextPreview } from "./text-preview";
 
 const doc = (pages: string[], youtube = false): DocumentData =>
@@ -26,13 +28,26 @@ const doc = (pages: string[], youtube = false): DocumentData =>
           { startSec: 0, text: "first line" },
           { startSec: 310, text: "later line" },
         ],
-        done: { done: true, stats: { segments: 2, words: 4, tokens: 5 }, coverage: 1 },
+        done: {
+          done: true,
+          stats: { segments: 2, words: 4, tokens: 5 },
+          coverage: 1,
+        },
       }
     : {
-        meta: { documentId: "d", title: "T", sourceType: "pdf", pages: pages.length },
+        meta: {
+          documentId: "d",
+          title: "T",
+          sourceType: "pdf",
+          pages: pages.length,
+        },
         pages: pages.map((text, i) => ({ page: i + 1, text })),
         segments: [],
-        done: { done: true, stats: { pages: pages.length, words: 1, tokens: 1 }, coverage: 1 },
+        done: {
+          done: true,
+          stats: { pages: pages.length, words: 1, tokens: 1 },
+          coverage: 1,
+        },
       };
 
 beforeEach(() => {
@@ -49,13 +64,20 @@ describe("TextPreview", () => {
   });
 
   it("opens a full-text sheet grouped by page, rendering progressively", async () => {
-    const pages = Array.from({ length: 100 }, (_, i) => `text of page ${i + 1}`);
+    const pages = Array.from(
+      { length: 100 },
+      (_, i) => `text of page ${i + 1}`,
+    );
     render(<TextPreview doc={doc(pages)} />);
-    await userEvent.click(screen.getByRole("button", { name: "Show full text" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Page 1")).toBeInTheDocument();
     expect(within(dialog).queryByText("Page 100")).not.toBeInTheDocument();
-    await userEvent.click(within(dialog).getByRole("button", { name: /Show more/ }));
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /Show more/ }),
+    );
     expect(within(dialog).getByText("Page 21")).toBeInTheDocument();
   });
 
@@ -64,19 +86,31 @@ describe("TextPreview", () => {
       i === 55 ? "needle here" : `plain ${i}`,
     );
     render(<TextPreview doc={doc(pages)} />);
-    await userEvent.click(screen.getByRole("button", { name: "Show full text" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
     const dialog = await screen.findByRole("dialog");
-    await userEvent.type(within(dialog).getByLabelText("Search in text"), "needle");
+    await userEvent.type(
+      within(dialog).getByLabelText("Search in text"),
+      "needle",
+    );
     expect(await within(dialog).findByText("1 of 1")).toBeInTheDocument();
     expect(within(dialog).getByText("Page 56")).toBeInTheDocument();
-    expect(dialog.querySelector('mark[data-active="true"]')).toHaveTextContent("needle");
+    expect(dialog.querySelector('mark[data-active="true"]')).toHaveTextContent(
+      "needle",
+    );
   });
 
   it("shows 'No match' when nothing is found", async () => {
     render(<TextPreview doc={doc(["abc"])} />);
-    await userEvent.click(screen.getByRole("button", { name: "Show full text" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
     const dialog = await screen.findByRole("dialog");
-    await userEvent.type(within(dialog).getByLabelText("Search in text"), "zzz");
+    await userEvent.type(
+      within(dialog).getByLabelText("Search in text"),
+      "zzz",
+    );
     expect(await within(dialog).findByText("No match")).toBeInTheDocument();
   });
 
@@ -87,10 +121,14 @@ describe("TextPreview", () => {
       configurable: true,
     });
     render(<TextPreview doc={doc(["alpha", "beta"])} />);
-    await userEvent.click(screen.getByRole("button", { name: "Show full text" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
     await userEvent.click(await screen.findByRole("button", { name: "Copy" }));
     expect(writeText).toHaveBeenCalledWith("[Page 1]\nalpha\n\n[Page 2]\nbeta");
-    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Copied" }),
+    ).toBeInTheDocument();
   });
 
   it("reports a failed copy", async () => {
@@ -99,15 +137,23 @@ describe("TextPreview", () => {
       configurable: true,
     });
     render(<TextPreview doc={doc(["alpha"])} />);
-    await userEvent.click(screen.getByRole("button", { name: "Show full text" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
     await userEvent.click(await screen.findByRole("button", { name: "Copy" }));
-    expect(await screen.findByRole("button", { name: "Copy failed" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Copy failed" }),
+    ).toBeInTheDocument();
   });
 
   it("links video timestamps to YouTube at that second", async () => {
     render(<TextPreview doc={doc([], true)} />);
-    await userEvent.click(screen.getByRole("button", { name: "Show full text" }));
-    const link = await screen.findByRole("link", { name: "Open at 05:10 on YouTube" });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
+    const link = await screen.findByRole("link", {
+      name: "Open at 05:10 on YouTube",
+    });
     expect(link).toHaveAttribute(
       "href",
       "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=310s",
@@ -121,5 +167,108 @@ describe("TextPreview", () => {
     render(<TextPreview doc={doc(['<img src=x onerror="alert(1)"> hi'])} />);
     expect(document.querySelector("img")).toBeNull();
     expect(screen.getByText(/<img src=x/)).toBeInTheDocument();
+  });
+});
+
+describe("FullTextSheet opened at a reference", () => {
+  const groupsOf = (d: DocumentData) => buildGroups(d);
+
+  it("renders through to a far page, scrolls to it and marks it briefly", () => {
+    vi.useFakeTimers();
+    try {
+      const pages = Array.from(
+        { length: 100 },
+        (_, i) => `text of page ${i + 1}`,
+      );
+      render(
+        <FullTextSheet
+          open
+          onOpenChange={vi.fn()}
+          groups={groupsOf(doc(pages))}
+          complete
+          focus={{ groupId: "p57", nonce: 1 }}
+        />,
+      );
+      // Page 57 is far past the first batch of 20, but it is there.
+      const page = screen.getByRole("region", { name: "Page 57" });
+      expect(page).toHaveAttribute("data-highlight", "true");
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+        block: "start",
+      });
+      const scrolled = vi.mocked(Element.prototype.scrollIntoView).mock
+        .contexts[0];
+      expect(scrolled).toBe(page);
+      // Nothing past it was rendered just for this.
+      expect(screen.queryByRole("region", { name: "Page 58" })).toBeNull();
+
+      vi.advanceTimersByTime(HIGHLIGHT_MS - 1);
+      expect(page).toHaveAttribute("data-highlight", "true");
+      vi.advanceTimersByTime(1);
+      expect(page).not.toHaveAttribute("data-highlight");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens a video at the cited paragraph, not just its 5-minute block", () => {
+    render(
+      <FullTextSheet
+        open
+        onOpenChange={vi.fn()}
+        groups={groupsOf(doc([], true))}
+        complete
+        focus={{ groupId: "b1", unitId: "s1", nonce: 1 }}
+      />,
+    );
+    const paragraph = screen.getByText("later line").closest("[data-ref-id]");
+    expect(paragraph).toHaveAttribute("data-ref-id", "s1");
+    expect(paragraph).toHaveAttribute("data-highlight", "true");
+    expect(
+      screen.getByRole("region", { name: "05:00 – 10:00" }),
+    ).not.toHaveAttribute("data-highlight");
+  });
+
+  it("highlights again when the same reference is tapped twice", () => {
+    vi.useFakeTimers();
+    try {
+      const groups = groupsOf(doc(["a", "b", "c"]));
+      const props = {
+        open: true,
+        onOpenChange: vi.fn(),
+        groups,
+        complete: true,
+      };
+      const { rerender } = render(
+        <FullTextSheet {...props} focus={{ groupId: "p2", nonce: 1 }} />,
+      );
+      const page = screen.getByRole("region", { name: "Page 2" });
+      vi.advanceTimersByTime(HIGHLIGHT_MS);
+      expect(page).not.toHaveAttribute("data-highlight");
+      rerender(
+        <FullTextSheet {...props} focus={{ groupId: "p2", nonce: 2 }} />,
+      );
+      expect(page).toHaveAttribute("data-highlight", "true");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens normally for a target that is not in the document, or with no focus", () => {
+    const groups = groupsOf(doc(["a", "b"]));
+    const { rerender } = render(
+      <FullTextSheet
+        open
+        onOpenChange={vi.fn()}
+        groups={groups}
+        complete
+        focus={{ groupId: "p99", nonce: 1 }}
+      />,
+    );
+    expect(document.querySelector("[data-highlight]")).toBeNull();
+    rerender(
+      <FullTextSheet open onOpenChange={vi.fn()} groups={groups} complete />,
+    );
+    expect(document.querySelector("[data-highlight]")).toBeNull();
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 });

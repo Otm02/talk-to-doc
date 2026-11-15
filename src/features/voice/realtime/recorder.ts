@@ -3,6 +3,8 @@
 // session's instructions hold the document and the system rules, so they are
 // redacted before anything is stored.
 
+import { downloadText } from "@/lib/download";
+
 export type RecordedDirection = "in" | "out" | "meta";
 
 export interface RecordedEntry {
@@ -13,7 +15,6 @@ export interface RecordedEntry {
 }
 
 const MAX_ENTRIES = 20_000;
-const REVOKE_DELAY_MS = 10_000;
 // Real events nest a handful of levels. Anything deeper is replaced, never
 // passed through, so a redaction can not be skipped by burying the value.
 const MAX_DEPTH = 32;
@@ -93,18 +94,7 @@ export class EventRecorder {
 
   /** Browser only: saves the log as a file. */
   download(filename = `realtime-session-${this.start}.jsonl`): void {
-    const url = URL.createObjectURL(
-      new Blob([this.toJsonl()], { type: "application/x-ndjson" }),
-    );
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    // Safari (iOS especially) starts the download after click() returns;
-    // revoking at once can cancel it.
-    setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
+    downloadText(filename, this.toJsonl(), "application/x-ndjson");
   }
 
   private push(dir: RecordedDirection, data: unknown): void {

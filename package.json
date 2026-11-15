@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "format": "prettier --write .",
     "check": "pnpm lint && pnpm typecheck && pnpm test:coverage",
-    "fixtures": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/make-fixtures.ts"
+    "fixtures": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/make-fixtures.ts",
+    "icons": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/make-icons.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -35,6 +36,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@playwright/test": "^1.65.0",
     "@tailwindcss/turbopack": "^4",
     "@testing-library/jest-dom": "^7.0.1",

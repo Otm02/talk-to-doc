@@ -69,6 +69,13 @@ describe("toErrorResult", () => {
     );
     expect(r.status).toBe(429);
     expect(r.headers).toEqual({ "retry-after": "42" });
+    // The same number is in the body, for clients that cannot read the header.
+    expect(r.body.error.retryAfterSec).toBe(42);
+  });
+
+  it("leaves retryAfterSec out when there is no wait", () => {
+    const r = toErrorResult(catalogError("pdf_empty"), "req-8");
+    expect("retryAfterSec" in r.body.error).toBe(false);
   });
 
   it("sends no extra headers for ordinary errors", () => {

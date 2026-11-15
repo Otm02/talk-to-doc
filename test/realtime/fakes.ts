@@ -66,6 +66,21 @@ export class FakeDataChannel {
   }
 }
 
+/** An RTCRtpSender: what addTrack and addTransceiver hand back. */
+export class FakeSender {
+  /** Make the next replaceTrack reject, as a browser does for a wrong kind. */
+  replaceError: Error | null = null;
+  constructor(
+    public track: unknown,
+    private readonly log: string[],
+  ) {}
+  replaceTrack = vi.fn(async (track: unknown) => {
+    this.log.push("replaceTrack");
+    if (this.replaceError) throw this.replaceError;
+    this.track = track;
+  });
+}
+
 export class FakePeerConnection {
   static instances: FakePeerConnection[] = [];
   /** Call names in the order they happened. */
@@ -73,6 +88,8 @@ export class FakePeerConnection {
   channel: FakeDataChannel | null = null;
   tracksAdded: unknown[] = [];
   transceivers: Array<{ kind: string; init: unknown }> = [];
+  /** One per addTrack / addTransceiver, in order. */
+  senders: FakeSender[] = [];
   localDescription: unknown = null;
   remoteDescription: unknown = null;
   closeCalls = 0;
@@ -83,6 +100,7 @@ export class FakePeerConnection {
   oniceconnectionstatechange: (() => void) | null = null;
   /** Make the next createOffer fail, e.g. after close. */
   offerError: Error | null = null;
+  setRemoteError: Error | null = null;
 
   constructor() {
     FakePeerConnection.instances.push(this);
@@ -91,12 +109,17 @@ export class FakePeerConnection {
   addTrack = vi.fn((track: unknown, stream: unknown) => {
     this.log.push("addTrack");
     this.tracksAdded.push([track, stream]);
-    return {};
+    const sender = new FakeSender(track, this.log);
+    this.senders.push(sender);
+    return sender;
   });
   addTransceiver = vi.fn((kind: string, init: unknown) => {
     this.log.push("addTransceiver");
     this.transceivers.push({ kind, init });
-    return {};
+    // No track yet: the sender exists so one can be attached later.
+    const sender = new FakeSender(null, this.log);
+    this.senders.push(sender);
+    return { sender };
   });
   createDataChannel = vi.fn((label: string) => {
     this.log.push("createDataChannel");
@@ -114,6 +137,7 @@ export class FakePeerConnection {
   });
   setRemoteDescription = vi.fn(async (d: unknown) => {
     this.log.push("setRemoteDescription");
+    if (this.setRemoteError) throw this.setRemoteError;
     this.remoteDescription = d;
   });
   close = vi.fn(() => {

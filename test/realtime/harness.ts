@@ -1,7 +1,8 @@
 import { expect, vi } from "vitest";
 import type { MicFailure } from "@/features/voice/realtime/failure";
+import type { MicPermission } from "@/features/voice/realtime/mic";
 import { LevelMeter } from "@/features/voice/realtime/levels";
-import { MintError } from "@/features/voice/realtime/mint";
+import { MintError, type HistoryTurn } from "@/features/voice/realtime/mint";
 import {
   MockTransport,
   type MockScript,
@@ -27,6 +28,8 @@ import {
 export interface HarnessOptions {
   /** How the mic prompt ends. "pending" never settles until resolveMic(). */
   mic?: "ok" | MicFailure | "pending";
+  /** What the Permissions API reports for the mic. Default "prompt". */
+  permission?: MicPermission;
   script?: MockScript;
   session?: Partial<SessionResponse>;
   /** Make mint() fail with this, or stay pending until resolveMint(). */
@@ -59,30 +62,43 @@ export function makeHarness(options: HarnessOptions = {}) {
     ...options.session,
   };
 
+  // Mutable, so a test can deny the mic at the start and allow it later.
+  const micNow = { result: options.mic, permission: options.permission };
+  const queryMicPermission = vi.fn(
+    async (): Promise<MicPermission> => micNow.permission ?? "prompt",
+  );
+
   const requestMic = vi.fn(async () => {
-    if (options.mic === "pending") {
+    if (micNow.result === "pending") {
       return new Promise<{ ok: true; stream: MediaStream }>((resolve) => {
         resolveMic = resolve;
       });
     }
-    if (options.mic && options.mic !== "ok") {
-      return { ok: false as const, reason: options.mic };
+    if (micNow.result && micNow.result !== "ok") {
+      return { ok: false as const, reason: micNow.result };
     }
     const stream = new FakeStream();
     micStreams.push(stream);
     return { ok: true as const, stream: asStream(stream) };
   });
 
-  const mint = vi.fn(async (_id: string, signal: AbortSignal) => {
-    void signal;
-    if (options.mintError === "pending") {
-      return new Promise<SessionResponse>((resolve) => {
-        resolveMint = resolve;
-      });
-    }
-    if (options.mintError) throw options.mintError;
-    return response;
-  });
+  const mint = vi.fn(
+    async (
+      _id: string,
+      signal: AbortSignal,
+      history?: readonly HistoryTurn[],
+    ) => {
+      void signal;
+      void history;
+      if (options.mintError === "pending") {
+        return new Promise<SessionResponse>((resolve) => {
+          resolveMint = resolve;
+        });
+      }
+      if (options.mintError) throw options.mintError;
+      return response;
+    },
+  );
 
   const createTransport = vi.fn(async () => {
     if (options.transportError) throw options.transportError;
@@ -98,6 +114,7 @@ export function makeHarness(options: HarnessOptions = {}) {
   const deps: SessionDeps = {
     mint,
     requestMic,
+    queryMicPermission,
     createTransport,
     createAudioElement: vi.fn(() => {
       const el = fakeAudioElement();
@@ -145,7 +162,13 @@ export function makeHarness(options: HarnessOptions = {}) {
     deps,
     mint,
     requestMic,
+    queryMicPermission,
     createTransport,
+    /** Change what the next mic request and permission check return. */
+    setMic(result: HarnessOptions["mic"], permission?: MicPermission) {
+      micNow.result = result;
+      micNow.permission = permission;
+    },
     frames,
     micStreams,
     transports,

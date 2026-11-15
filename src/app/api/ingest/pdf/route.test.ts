@@ -283,7 +283,7 @@ describe("429: rate limit", () => {
       limited,
       429,
       "rate_limited",
-      "Too many tries. Wait a minute and try again.",
+      "Too many tries. Try again when the timer ends.",
     );
     const retryAfter = Number(limited.headers.get("retry-after"));
     expect(retryAfter).toBeGreaterThan(0);

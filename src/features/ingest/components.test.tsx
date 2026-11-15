@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentCard } from "@/features/document/document-card";
@@ -41,8 +41,13 @@ describe("YoutubeField", () => {
   it("shows a live error for a bad link and blocks submit", async () => {
     const onSubmit = vi.fn();
     render(<YoutubeField onSubmit={onSubmit} />);
-    await userEvent.type(screen.getByLabelText("YouTube link"), "https://example.com/watch");
-    expect(screen.getByText("That doesn't look like a YouTube video link.")).toBeInTheDocument();
+    await userEvent.type(
+      screen.getByLabelText("YouTube link"),
+      "https://example.com/watch",
+    );
+    expect(
+      screen.getByText("That doesn't look like a YouTube video link."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Load video" })).toBeDisabled();
     await userEvent.keyboard("{Enter}");
     expect(onSubmit).not.toHaveBeenCalled();
@@ -61,39 +66,92 @@ describe("YoutubeField", () => {
   it("hides Paste when the Clipboard API is missing", () => {
     vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
     render(<YoutubeField onSubmit={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: /Paste/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Paste/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("pastes from the clipboard when supported", async () => {
     vi.stubGlobal("navigator", {
       ...navigator,
-      clipboard: { readText: vi.fn().mockResolvedValue(" https://youtu.be/jNQXAC9IVRw ") },
+      clipboard: {
+        readText: vi.fn().mockResolvedValue(" https://youtu.be/jNQXAC9IVRw "),
+      },
     });
     render(<YoutubeField onSubmit={vi.fn()} />);
     await userEvent.click(await screen.findByRole("button", { name: /Paste/ }));
-    expect(screen.getByLabelText("YouTube link")).toHaveValue("https://youtu.be/jNQXAC9IVRw");
+    expect(screen.getByLabelText("YouTube link")).toHaveValue(
+      "https://youtu.be/jNQXAC9IVRw",
+    );
   });
 });
 
 describe("ErrorCard", () => {
   it("offers the right action per code", async () => {
     const onAction = vi.fn();
-    const { rerender } = render(<ErrorCard code="pdf_too_large" onAction={onAction} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("This PDF is over 25 MB.");
-    await userEvent.click(screen.getByRole("button", { name: "Choose another file" }));
+    const { rerender } = render(
+      <ErrorCard code="pdf_too_large" onAction={onAction} />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This PDF is over 25 MB.",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose another file" }),
+    );
     expect(onAction).toHaveBeenLastCalledWith("pick-another-file");
 
     rerender(<ErrorCard code="youtube_blocked" onAction={onAction} />);
-    await userEvent.click(screen.getByRole("button", { name: "Try a PDF instead" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Try a PDF instead" }),
+    );
     expect(onAction).toHaveBeenLastCalledWith("try-pdf");
 
     rerender(<ErrorCard code="youtube_failed" onAction={onAction} />);
-    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Try again" }),
+    ).toBeInTheDocument();
   });
 
-  it("mentions Retry-After", () => {
-    render(<ErrorCard code="rate_limited" retryAfterSeconds={30} onAction={vi.fn()} />);
-    expect(screen.getByText(/in 30 seconds/)).toBeInTheDocument();
+  it("counts a 429 down on the button and re-enables it at 0", () => {
+    vi.useFakeTimers();
+    try {
+      const onAction = vi.fn();
+      render(
+        <ErrorCard
+          code="rate_limited"
+          retryAt={Date.now() + 30_000}
+          onAction={onAction}
+        />,
+      );
+      const button = screen.getByTestId("retry-button");
+      expect(button).toBeDisabled();
+      expect(button).toHaveTextContent("Try again in 30s");
+      // Said once with the error, not on every tick.
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "You can try again in 30 seconds.",
+      );
+
+      act(() => void vi.advanceTimersByTime(30_000));
+      expect(button).toBeEnabled();
+      expect(button).toHaveTextContent(/^Try again$/);
+      fireEvent.click(button);
+      expect(onAction).toHaveBeenCalledWith("retry");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never makes 'choose another file' wait for a retry deadline", () => {
+    render(
+      <ErrorCard
+        code="pdf_too_large"
+        retryAt={Date.now() + 30_000}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Choose another file" }),
+    ).toBeEnabled();
   });
 });
 
@@ -102,13 +160,21 @@ describe("UploadStatus", () => {
     const onCancel = vi.fn();
     render(
       <UploadStatus
-        state={{ status: "uploading", fileName: "a.pdf", size: 2048, percent: 42 }}
+        state={{
+          status: "uploading",
+          fileName: "a.pdf",
+          size: 2048,
+          percent: 42,
+        }}
         source="pdf"
         onCancel={onCancel}
       />,
     );
     expect(screen.getByText("a.pdf")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "42",
+    );
     expect(screen.getByRole("status")).toHaveTextContent("Uploading…");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalled();
@@ -121,8 +187,16 @@ describe("UploadStatus", () => {
       segments: [],
       done: null,
     };
-    render(<UploadStatus state={{ status: "extracting", doc }} source="pdf" onCancel={vi.fn()} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Reading page 37 of 120…");
+    render(
+      <UploadStatus
+        state={{ status: "extracting", doc }}
+        source="pdf"
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Reading page 37 of 120…",
+    );
   });
 });
 
@@ -148,8 +222,13 @@ describe("DocumentCard", () => {
 
   it("shows title and thumbnail as soon as meta arrives, before stats", () => {
     const { container } = render(<DocumentCard doc={base} />);
-    expect(screen.getByRole("heading", { name: "Me at the zoo" })).toBeInTheDocument();
-    expect(container.querySelector("img")).toHaveAttribute("src", "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg");
+    expect(
+      screen.getByRole("heading", { name: "Me at the zoo" }),
+    ).toBeInTheDocument();
+    expect(container.querySelector("img")).toHaveAttribute(
+      "src",
+      "https://i.ytimg.com/vi/jNQXAC9IVRw/hqdefault.jpg",
+    );
     expect(screen.getByText(/Counting/)).toBeInTheDocument();
     expect(screen.getByText("Auto-generated captions")).toBeInTheDocument();
     expect(screen.queryByText(/Whole document/)).not.toBeInTheDocument();
@@ -160,11 +239,17 @@ describe("DocumentCard", () => {
       <DocumentCard
         doc={{
           ...base,
-          done: { done: true, stats: { segments: 1, words: 1200, tokens: 1600 }, coverage: 1 },
+          done: {
+            done: true,
+            stats: { segments: 1, words: 1200, tokens: 1600 },
+            coverage: 1,
+          },
         }}
       />,
     );
-    expect(screen.getByText(/19 s · 1,200 words · 1,600 tokens/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/19 s · 1,200 words · 1,600 tokens/),
+    ).toBeInTheDocument();
     expect(screen.getByText("Whole document in context")).toBeInTheDocument();
   });
 
@@ -172,16 +257,34 @@ describe("DocumentCard", () => {
     render(
       <DocumentCard
         doc={{
-          meta: { documentId: "d", title: "Big", sourceType: "pdf", pages: 120 },
-          pages: [{ page: 1, text: "" }, { page: 2, text: "x" }],
+          meta: {
+            documentId: "d",
+            title: "Big",
+            sourceType: "pdf",
+            pages: 120,
+          },
+          pages: [
+            { page: 1, text: "" },
+            { page: 2, text: "x" },
+          ],
           segments: [],
-          done: { done: true, stats: { pages: 120, words: 9, tokens: 9 }, coverage: 0.649 },
+          done: {
+            done: true,
+            stats: { pages: 120, words: 9, tokens: 9 },
+            coverage: 0.649,
+          },
         }}
       />,
     );
-    expect(screen.getByText("First 64% fits in the voice context")).toBeInTheDocument();
+    expect(
+      screen.getByText("First 64% fits in the voice context"),
+    ).toBeInTheDocument();
     expect(screen.getByText(/1 page had no text/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Why this matters" }));
-    expect(await screen.findByText(/limited amount of text/)).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Why this matters" }),
+    );
+    expect(
+      await screen.findByText(/limited amount of text/),
+    ).toBeInTheDocument();
   });
 });

@@ -42,7 +42,7 @@ export class TransportError extends Error {
 export interface ConnectOptions {
   /** The short-lived secret from our server. Never logged or stored. */
   clientSecret: string;
-  /** null = text mode: no microphone is sent. */
+  /** null = text mode: nothing is sent yet, but upgradeMic() can add it later. */
   micStream: MediaStream | null;
 }
 
@@ -54,6 +54,12 @@ export interface RealtimeTransport {
   connect(options: ConnectOptions): Promise<void>;
   /** false when the channel cannot take the event right now. */
   send(event: ClientEvent): boolean;
+  /**
+   * Starts sending this microphone on the connection that already exists: no
+   * new offer, no new client secret. Resolves false when that is not possible
+   * (the caller then reconnects once); never rejects.
+   */
+  upgradeMic(stream: MediaStream): Promise<boolean>;
   /** Idempotent. Releases everything the transport created. */
   close(): void;
   /** Raw data-channel messages. Returns an unsubscribe function. */

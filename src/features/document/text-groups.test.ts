@@ -47,6 +47,8 @@ describe("buildGroups", () => {
     expect(g[2]?.units[0]?.stamp).toEqual({
       label: "10:50",
       href: "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=650s",
+      // Kept as a number so a "[10:52]" in an answer can be matched to it.
+      startSec: 650,
     });
   });
 });
@@ -82,7 +84,10 @@ describe("search", () => {
   });
 
   it("counts matches across groups and maps them to groups", () => {
-    const idx = indexMatches(buildGroups(pdf(["foo foo", "bar", "Foo"])), "foo");
+    const idx = indexMatches(
+      buildGroups(pdf(["foo foo", "bar", "Foo"])),
+      "foo",
+    );
     expect(idx.total).toBe(3);
     expect(idx.groupOfMatch).toEqual([0, 0, 2]);
   });

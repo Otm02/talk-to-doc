@@ -10,13 +10,18 @@ function Probe({ active }: { active: boolean }) {
 
 function stubWakeLock() {
   const release = vi.fn(() => Promise.resolve());
-  const request = vi.fn(() => Promise.resolve({ release } as unknown as WakeLockSentinel));
+  const request = vi.fn(() =>
+    Promise.resolve({ release } as unknown as WakeLockSentinel),
+  );
   vi.stubGlobal("navigator", { ...navigator, wakeLock: { request } });
   return { request, release };
 }
 const flush = () => new Promise((r) => setTimeout(r, 0));
 function setVisibility(v: "hidden" | "visible") {
-  Object.defineProperty(document, "visibilityState", { configurable: true, value: v });
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: v,
+  });
   document.dispatchEvent(new Event("visibilitychange"));
 }
 

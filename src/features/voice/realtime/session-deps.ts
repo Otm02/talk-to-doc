@@ -6,7 +6,7 @@ import {
 } from "./audio";
 import { isDebug } from "./debug";
 import { LevelMeter } from "./levels";
-import { requestMic } from "./mic";
+import { queryMicPermission, requestMic } from "./mic";
 import { isFailureCode } from "./failure";
 import { MintError, mintSession } from "./mint";
 import { EventRecorder } from "./recorder";
@@ -45,11 +45,12 @@ function mockMint(): Promise<SessionResponse> {
 
 export function createBrowserDeps(): SessionDeps {
   return {
-    mint: (documentId, signal) =>
+    mint: (documentId, signal, history) =>
       mockScenarioFromSearch(search())
         ? mockMint()
-        : mintSession(documentId, signal),
+        : mintSession(documentId, signal, undefined, history),
     requestMic: () => requestMic(),
+    queryMicPermission: () => queryMicPermission(),
     createTransport: (ctx) => createTransport(ctx, search()),
     createAudioElement: () => createRemoteAudioElement(),
     removeAudioElement,

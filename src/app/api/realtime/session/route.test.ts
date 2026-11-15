@@ -133,7 +133,16 @@ async function expectError(
 ): Promise<void> {
   expect(res.status).toBe(ERROR_CATALOG[code].status);
   const body = await res.json();
-  expect(body.error).toEqual({ code, message: ERROR_CATALOG[code].message });
+  const { retryAfterSec, ...error } = body.error;
+  expect(error).toEqual({ code, message: ERROR_CATALOG[code].message });
+  if (res.status === 429) {
+    // Every 429 says how long to wait, in the header and in the body.
+    expect(Number.isInteger(retryAfterSec)).toBe(true);
+    expect(retryAfterSec).toBeGreaterThan(0);
+    expect(res.headers.get("retry-after")).toBe(String(retryAfterSec));
+  } else {
+    expect(retryAfterSec).toBeUndefined();
+  }
   expect(typeof body.requestId).toBe("string");
   expect(JSON.stringify(body)).not.toContain("upstream words");
 }
@@ -410,19 +419,21 @@ describe("gates", () => {
     );
   });
 
-  it("per-IP limit: 5 starts per 10 minutes, then 429 with Retry-After", async () => {
+  it("per-IP limit: 15 starts per 10 minutes, then 429 with Retry-After", async () => {
     const ip = "198.51.100.7";
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 15; i += 1) {
       expect((await post({ documentId: PDF_ID }, { ip })).status).toBe(200);
     }
 
     const res = await post({ documentId: PDF_ID }, { ip });
 
-    await expectError(res, "rate_limited");
+    // expectError also checks retryAfterSec in the body against the header.
+    await expectError(res.clone(), "rate_limited");
     const retryAfter = Number(res.headers.get("retry-after"));
     expect(retryAfter).toBeGreaterThan(0);
     expect(retryAfter).toBeLessThanOrEqual(600);
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect((await res.json()).error.retryAfterSec).toBe(retryAfter);
+    expect(fetchMock).toHaveBeenCalledTimes(15);
 
     // Another address is unaffected.
     expect(
@@ -435,7 +446,7 @@ describe("gates", () => {
     resetEnvCacheForTests();
     const ip = "198.51.100.9";
     // Cap 0 blocks every start, but each attempt still counts against the IP.
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 15; i += 1) {
       await expectError(
         await post({ documentId: PDF_ID }, { ip }),
         "daily_limit",
@@ -455,7 +466,9 @@ describe("gates", () => {
     expect((await post({ documentId: PDF_ID })).status).toBe(200);
     const res = await post({ documentId: PDF_ID });
 
-    await expectError(res, "daily_limit");
+    await expectError(res.clone(), "daily_limit");
+    // The counter resets at UTC midnight, so the wait is never more than a day.
+    expect((await res.json()).error.retryAfterSec).toBeLessThanOrEqual(86_400);
     expect(ERROR_CATALOG.daily_limit.message).toBe(
       "The demo's voice sessions for today are used up.",
     );

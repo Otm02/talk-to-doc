@@ -51,7 +51,7 @@ describe("enforceRateLimit", () => {
     expect(err).toMatchObject({
       code: "rate_limited",
       httpStatus: 429,
-      userMessage: "Too many tries. Wait a minute and try again.",
+      userMessage: "Too many tries. Try again when the timer ends.",
     });
     const retry = (err as { retryAfterSeconds: number }).retryAfterSeconds;
     expect(retry).toBeGreaterThan(0);

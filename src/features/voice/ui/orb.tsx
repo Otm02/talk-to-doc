@@ -3,14 +3,23 @@
 import { useEffect, useRef } from "react";
 import type { LevelKind } from "../realtime/levels";
 
-type Subscribe = (kind: LevelKind, listener: (level: number) => void) => () => void;
+type Subscribe = (
+  kind: LevelKind,
+  listener: (level: number) => void,
+) => () => void;
 
 /**
  * The orb reacts to how loud you are (blue ring) and how loud the assistant
  * is (neutral ring). Levels go straight to CSS variables: no React renders at
  * animation-frame rate. With reduced motion it stays still.
  */
-export function Orb({ subscribeLevel, dimmed }: { subscribeLevel: Subscribe; dimmed: boolean }) {
+export function Orb({
+  subscribeLevel,
+  dimmed,
+}: {
+  subscribeLevel: Subscribe;
+  dimmed: boolean;
+}) {
   const root = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -19,7 +28,9 @@ export function Orb({ subscribeLevel, dimmed }: { subscribeLevel: Subscribe; dim
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const offs = [
       subscribeLevel("mic", (l) => el.style.setProperty("--mic", String(l))),
-      subscribeLevel("remote", (l) => el.style.setProperty("--remote", String(l))),
+      subscribeLevel("remote", (l) =>
+        el.style.setProperty("--remote", String(l)),
+      ),
     ];
     return () => offs.forEach((off) => off());
   }, [subscribeLevel]);

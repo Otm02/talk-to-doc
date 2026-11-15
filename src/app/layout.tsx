@@ -19,6 +19,14 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   colorScheme: "light dark",
+  // Chrome and Samsung Internet on Android: shrink the layout when the soft
+  // keyboard opens, so the composer sits on top of it. iOS Safari ignores
+  // this; the chat screen sizes itself from visualViewport for that case.
+  interactiveWidget: "resizes-content",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
 };
 
 export default function RootLayout({

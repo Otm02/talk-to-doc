@@ -55,6 +55,13 @@ export interface StateAdapters {
   rateLimiter: RateLimiter;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whole seconds until the daily counters roll over (next UTC midnight), at least 1. */
+export function secondsUntilNextUtcDay(ms: number): number {
+  return Math.max(1, Math.ceil((DAY_MS - (ms % DAY_MS)) / 1000));
+}
+
 /** UTC day key, e.g. 2026-11-09. */
 export function dayKey(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);

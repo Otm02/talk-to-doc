@@ -52,14 +52,20 @@ export function IngestScreen() {
   }
 
   const doc =
-    state.status === "ready" || state.status === "extracting" ? state.doc : null;
+    state.status === "ready" || state.status === "extracting"
+      ? state.doc
+      : null;
 
   if (doc) {
     const view = (
       <div className="flex flex-1 flex-col gap-4">
         <DocumentCard doc={doc} />
         {state.status === "extracting" && (
-          <UploadStatus state={state} source={source} onCancel={ingest.cancel} />
+          <UploadStatus
+            state={state}
+            source={source}
+            onCancel={ingest.cancel}
+          />
         )}
         <TextPreview doc={doc} />
       </div>
@@ -105,7 +111,7 @@ export function IngestScreen() {
       {state.status === "error" && (
         <ErrorCard
           code={state.code}
-          retryAfterSeconds={state.retryAfterSeconds}
+          retryAt={state.retryAt}
           onAction={onErrorAction}
         />
       )}

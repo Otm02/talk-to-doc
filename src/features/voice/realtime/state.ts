@@ -15,6 +15,11 @@ export type ConnectionState =
       code: FailureCode;
       /** Seconds to wait before trying again, when the server said so (429). */
       retryAfterSeconds?: number;
+      /**
+       * The same wait as a wall-clock deadline (ms since epoch), fixed when the
+       * refusal arrived. Countdowns read this, so they cannot drift.
+       */
+      retryAt?: number;
     };
 
 export type ConnectionStatus = ConnectionState["status"];
@@ -75,6 +80,10 @@ export interface RealtimeState {
   connection: ConnectionState;
   mode: Mode;
   micIssue: MicFailure | null;
+  /** "working" while a tap on "Try microphone again" is being checked. */
+  micRetry: "idle" | "working";
+  /** Retries that ended without a mic, in this chat. The coach opens on the first. */
+  micRetryFails: number;
   muted: boolean;
   activity: Activity;
   items: Record<string, TranscriptItem>;
@@ -98,6 +107,8 @@ export const initialState: RealtimeState = {
   connection: { status: "idle" },
   mode: "voice",
   micIssue: null,
+  micRetry: "idle",
+  micRetryFails: 0,
   muted: false,
   activity: "listening",
   items: {},

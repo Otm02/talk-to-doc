@@ -18,6 +18,7 @@ import {
 } from "../realtime/createClientSecret";
 import { enforceRateLimit } from "../security/rate-limit";
 import { getState } from "../state";
+import { secondsUntilNextUtcDay } from "../state/types";
 import { loadInstructionDocument } from "./document";
 import {
   getAnonymousIdentity,
@@ -60,7 +61,10 @@ export async function createSession(
   if (!env.voiceEnabled) throw catalogError("voice_disabled");
   await enforceRateLimit(req, "session", SESSION_IP_RATE);
   if ((await rateLimiter.peekDaily(DAILY_SESSION_KEY)) >= env.dailySessionCap) {
-    throw catalogError("daily_limit");
+    // The counter is keyed by UTC date, so that is when it frees up.
+    throw catalogError("daily_limit", {
+      retryAfterSeconds: secondsUntilNextUtcDay(Date.now()),
+    });
   }
 
   const body = parseWith(SessionBodySchema, await readBody(req));

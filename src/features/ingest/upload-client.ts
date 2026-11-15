@@ -55,9 +55,43 @@ function codeFromBody(body: unknown): string {
   return "internal";
 }
 
-function retryAfter(value: string | null): number | undefined {
-  const seconds = Number(value);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
+const MAX_BODY_WAIT_SEC = 86_400;
+const MAX_HEADER_WAIT_SEC = 3_600;
+
+/**
+ * How long a 429 asks us to wait: `error.retryAfterSec` in the body, or the
+ * Retry-After header when a proxy answered instead of our route.
+ */
+export function retryAfter(
+  body: unknown,
+  header: string | null,
+): number | undefined {
+  let fromBody: unknown;
+  if (typeof body === "object" && body !== null && "error" in body) {
+    const { error } = body;
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "retryAfterSec" in error
+    ) {
+      fromBody = error.retryAfterSec;
+    }
+  }
+  // Same ceilings as the session mint: a bad header must not park the retry
+  // button for days.
+  const candidates: Array<[unknown, number]> = [
+    [fromBody, MAX_BODY_WAIT_SEC],
+    [
+      header === null || header.trim() === "" ? undefined : Number(header),
+      MAX_HEADER_WAIT_SEC,
+    ],
+  ];
+  for (const [raw, cap] of candidates) {
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      return Math.min(Math.ceil(raw), cap);
+    }
+  }
+  return undefined;
 }
 
 async function errorFromResponse(res: Response): Promise<IngestError> {
@@ -65,7 +99,7 @@ async function errorFromResponse(res: Response): Promise<IngestError> {
   return new IngestError(
     codeFromBody(body),
     `HTTP ${res.status}`,
-    retryAfter(res.headers.get("retry-after")),
+    retryAfter(body, res.headers.get("retry-after")),
   );
 }
 
@@ -150,7 +184,7 @@ function postFormWithProgress(
         new IngestError(
           codeFromBody(body),
           `HTTP ${xhr.status}`,
-          retryAfter(xhr.getResponseHeader("retry-after")),
+          retryAfter(body, xhr.getResponseHeader("retry-after")),
         ),
       );
     };
@@ -216,7 +250,8 @@ export async function ingestYoutube(
   url: string,
   signal: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
-  const lang = typeof navigator === "undefined" ? undefined : navigator.language;
+  const lang =
+    typeof navigator === "undefined" ? undefined : navigator.language;
   const res = await fetch("/api/ingest/youtube", {
     method: "POST",
     headers: { "content-type": "application/json" },

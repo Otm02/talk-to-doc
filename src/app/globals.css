@@ -27,6 +27,8 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-text: var(--destructive-text);
+  --color-destructive-solid: var(--destructive-solid);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
@@ -64,10 +66,15 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* 0.556 was 4.34:1 on --muted, under the 4.5:1 AA needs for small text. */
+  --muted-foreground: oklch(0.49 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* For red words on a red tint, where --destructive itself is only 4:1. */
+  --destructive-text: oklch(0.47 0.2 27);
+  /* A filled red button with white text on it (End). */
+  --destructive-solid: oklch(0.53 0.23 27);
   --success: oklch(0.45 0.13 150);
   --warning: oklch(0.75 0.15 75);
   --warning-foreground: oklch(0.35 0.08 65);
@@ -108,6 +115,9 @@
     --accent: oklch(0.269 0 0);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
+    --destructive-text: oklch(0.82 0.11 22);
+    /* Dark mode's --destructive is a light red: white on it is 2.9:1. */
+    --destructive-solid: oklch(0.5 0.2 27);
     --success: oklch(0.78 0.15 150);
     --warning: oklch(0.8 0.15 80);
     --warning-foreground: oklch(0.9 0.1 85);
@@ -140,6 +150,31 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* The page or paragraph a grounding chip opened: a brief wash of colour. */
+@keyframes ref-highlight {
+  0%,
+  45% {
+    background-color: color-mix(in oklch, var(--user) 24%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+[data-highlight="true"] {
+  border-radius: 0.5rem;
+  animation: ref-highlight 1.6s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No fade: a still outline for as long as the mark is on. */
+  [data-highlight="true"] {
+    animation: none;
+    outline: 2px solid var(--user);
+    outline-offset: 2px;
   }
 }
 

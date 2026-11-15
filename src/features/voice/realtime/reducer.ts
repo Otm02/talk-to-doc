@@ -4,6 +4,7 @@ import {
   initialState,
   type Activity,
   type ConnectionState,
+  type ItemStatus,
   type Mode,
   type Notice,
   type RealtimeState,
@@ -24,10 +25,14 @@ import { addResponseUsage, addTranscriptionUsage } from "./usage";
 
 export type Action =
   | { type: "reset" }
+  /** A replacement session for the same chat: the transcript stays. */
+  | { type: "restart" }
   | { type: "server"; event: ServerEvent }
   | { type: "diagnostic"; kind: "unknown" | "malformed"; eventType?: string }
   | { type: "connection"; connection: ConnectionState }
   | { type: "mode"; mode: Mode; micIssue: MicFailure | null }
+  | { type: "mic-retry"; status: "idle" | "working" }
+  | { type: "mic-retry-failed"; reason: MicFailure }
   | { type: "muted"; muted: boolean }
   | {
       type: "local-text";
@@ -290,6 +295,8 @@ function applyConnection(
       const settled = settleItems(base);
       return {
         ...settled,
+        // Whatever a retry was waiting on died with the chat.
+        micRetry: "idle",
         activity: "listening",
         response: { activeId: null, audioId: null },
         pending: {},
@@ -511,6 +518,26 @@ function onResponseDone(
   return s;
 }
 
+function settled(status: ItemStatus): ItemStatus {
+  switch (status) {
+    case "streaming":
+      return "interrupted";
+    case "transcribing":
+      return "transcriptionFailed";
+    case "sending":
+      return "sendFailed";
+    case "transcriptionFailed":
+    case "sendFailed":
+    case "interrupted":
+    case "done":
+      return status;
+    default: {
+      const unreachable: never = status;
+      return unreachable;
+    }
+  }
+}
+
 function onServerEvent(
   state: RealtimeState,
   event: ServerEvent,
@@ -716,6 +743,20 @@ export function reducer(state: RealtimeState, action: Action): RealtimeState {
   switch (action.type) {
     case "reset":
       return initialState;
+    case "restart": {
+      // Whatever was mid-flight on the old session will never finish.
+      const items: RealtimeState["items"] = {};
+      for (const [id, item] of Object.entries(state.items)) {
+        items[id] = { ...item, status: settled(item.status) };
+      }
+      return {
+        ...initialState,
+        items,
+        order: visibleOrder(items),
+        epoch: state.epoch,
+        arrivalSeq: state.arrivalSeq,
+      };
+    }
     case "server":
       return onServerEvent(state, action.event);
     case "diagnostic": {
@@ -737,7 +778,24 @@ export function reducer(state: RealtimeState, action: Action): RealtimeState {
     case "connection":
       return applyConnection(state, action.connection);
     case "mode":
-      return { ...state, mode: action.mode, micIssue: action.micIssue };
+      return {
+        ...state,
+        mode: action.mode,
+        micIssue: action.micIssue,
+        // A working mic wipes the slate; the next problem starts its own count.
+        micRetryFails: action.micIssue === null ? 0 : state.micRetryFails,
+      };
+    case "mic-retry":
+      return state.micRetry === action.status
+        ? state
+        : { ...state, micRetry: action.status };
+    case "mic-retry-failed":
+      return {
+        ...state,
+        micIssue: action.reason,
+        micRetry: "idle",
+        micRetryFails: state.micRetryFails + 1,
+      };
     case "muted":
       return state.muted === action.muted
         ? state

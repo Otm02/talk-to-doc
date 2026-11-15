@@ -33,6 +33,8 @@ export interface MockScript {
   replyWith?: "text" | "audio";
   /** Milliseconds between words of a reply to a typed message. Default 60. */
   wordMs?: number;
+  /** "fail" = upgradeMic() says no, as if the track could not be swapped in. */
+  micUpgrade?: "fail";
 }
 
 export interface MockOptions {
@@ -76,6 +78,9 @@ export class MockTransport implements RealtimeTransport {
   readonly sent: ClientEvent[] = [];
   /** How connect() was called, to check mic handling. */
   lastConnect: ConnectOptions | null = null;
+  /** Every stream handed to upgradeMic(), accepted or not. */
+  readonly micUpgrades: MediaStream[] = [];
+  private micAttached = false;
   closeCount = 0;
 
   private state: TransportState = "idle";
@@ -145,6 +150,14 @@ export class MockTransport implements RealtimeTransport {
     return true;
   }
 
+  upgradeMic(stream: MediaStream): Promise<boolean> {
+    if (this.state !== "connected") return Promise.resolve(false);
+    this.micUpgrades.push(stream);
+    if (this.script.micUpgrade === "fail") return Promise.resolve(false);
+    this.micAttached = true;
+    return Promise.resolve(true);
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -184,8 +197,10 @@ export class MockTransport implements RealtimeTransport {
         return;
       }
       case "response.create": {
+        // A chat that gained a mic answers out loud from then on.
         const audio =
-          event.response === undefined && this.script.replyWith === "audio";
+          event.response === undefined &&
+          (this.script.replyWith === "audio" || this.micAttached);
         this.startAnswer(this.script.textAnswer ?? DEFAULT_ANSWER, audio);
         return;
       }

@@ -25,11 +25,15 @@ export async function createTransport(
       import("./mock-scenarios"),
     ]);
     const script = scenarioScript(scenario);
+    const params = new URLSearchParams(search);
     // Lets a test slow a reply down enough to act on it mid-stream.
-    const wordMs = Number(new URLSearchParams(search).get("mockWordMs"));
-    return new MockTransport(
-      Number.isInteger(wordMs) && wordMs > 0 ? { ...script, wordMs } : script,
-    );
+    const wordMs = Number(params.get("mockWordMs"));
+    return new MockTransport({
+      ...script,
+      ...(Number.isInteger(wordMs) && wordMs > 0 && { wordMs }),
+      // Makes the in-place mic upgrade refuse, to exercise the one reconnect.
+      ...(params.get("mockMicUpgrade") === "fail" && { micUpgrade: "fail" }),
+    });
   }
   if (typeof RTCPeerConnection === "undefined" || !ctx.audioElement) {
     throw new TransportError("unsupported");

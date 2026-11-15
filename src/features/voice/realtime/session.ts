@@ -9,10 +9,10 @@ import {
   type ClientEvent,
 } from "./client-events";
 import { parseServerEvent } from "./events";
-import type { FailureCode } from "./failure";
+import type { FailureCode, MicFailure } from "./failure";
 import type { LevelKind, LevelListener, LevelMeter } from "./levels";
-import { MintError } from "./mint";
-import { stopStream, type MicResult } from "./mic";
+import { MintError, type HistoryTurn } from "./mint";
+import { stopStream, type MicPermission, type MicResult } from "./mic";
 import type { EventRecorder } from "./recorder";
 import { reducer, type Action } from "./reducer";
 import {
@@ -37,16 +37,27 @@ import {
 //  - Every await is followed by a "still the same run?" check, so End or
 //    unmount at any point releases whatever that step had just acquired.
 //  - One cleanup() releases everything and is safe to call twice.
+//  - A chat mints one client secret. Adding a microphone to a text chat goes
+//    through the connection that already exists (enableMic); nothing touches
+//    the network until getUserMedia has actually returned a stream.
 
 export const IDLE_MS = 120_000;
 export const HIDDEN_MS = 60_000;
 export const RECONNECT_GRACE_MS = 5_000;
 export const CAP_WARNING_MS = 60_000;
+/** Taps on "Try microphone again" closer together than this are one tap. */
+export const MIC_RETRY_MIN_MS = 1_000;
 
 export interface SessionDeps {
-  mint(documentId: string, signal: AbortSignal): Promise<SessionResponse>;
+  mint(
+    documentId: string,
+    signal: AbortSignal,
+    history?: readonly HistoryTurn[],
+  ): Promise<SessionResponse>;
   /** Called synchronously from start(), inside the user's tap. */
   requestMic(): Promise<MicResult>;
+  /** What asking for the mic would do, without asking. Never rejects. */
+  queryMicPermission(): Promise<MicPermission>;
   createTransport(ctx: {
     audioElement: HTMLAudioElement | null;
   }): RealtimeTransport | Promise<RealtimeTransport>;
@@ -98,9 +109,10 @@ export function failureForTransportError(err: unknown): FailureCode | null {
       return "session_upstream_busy";
     case "budget":
       return "budget_exhausted";
+    case "network":
+      return "session_network_failed";
     case "timeout":
     case "rejected":
-    case "network":
     case "unsupported":
       return "session_connect_failed";
     default: {
@@ -132,6 +144,7 @@ export class VoiceSession {
   private hiddenSince: number | null = null;
   private capDeadline: number | null = null;
   private lastActivityAt = 0;
+  private lastMicRetryAt = Number.NEGATIVE_INFINITY;
   private readonly levelListeners: Record<LevelKind, Set<LevelListener>> = {
     mic: new Set(),
     remote: new Set(),
@@ -177,7 +190,49 @@ export class VoiceSession {
   start(mode: Mode): void {
     const status = this.state.connection.status;
     if (status !== "idle" && status !== "ended" && status !== "failed") return;
+    this.begin(mode, null);
+  }
 
+  /**
+   * Turns a text chat into a voice chat, from a tap on "Try microphone again"
+   * or the mic button. The order is the point:
+   *  1. Ask the browser whether the mic is blocked. If it is, say so and stop.
+   *  2. getUserMedia. If it fails, say why and stop.
+   *  3. Only with a stream in hand, attach it to the connection that already
+   *     exists. No new session, no new client secret.
+   * Steps 1 and 2 never touch the network, so tapping a button that cannot
+   * work costs nothing. (It used to restart the chat first, minting a secret
+   * per tap, and a few taps locked a real phone out of the per-IP limit.)
+   */
+  enableMic(): void {
+    const s = this.state;
+    if (s.connection.status !== "connected" || s.mode !== "text") return;
+    if (s.micRetry === "working") return;
+    const now = this.deps.now();
+    if (now - this.lastMicRetryAt < MIC_RETRY_MIN_MS) return;
+    this.lastMicRetryAt = now;
+
+    // Still inside the tap: a text chat may never have unlocked audio output.
+    void this.res.audioContext?.resume().catch(() => {});
+    void this.res.audioElement?.play?.()?.catch(() => {});
+
+    const run = this.runId;
+    this.recorder?.recordMeta({ event: "mic_retry" });
+    this.dispatch({ type: "mic-retry", status: "working" });
+    this.upgradeToVoice(run)
+      // Nothing in there should throw; if it does, the chat stays a text chat.
+      .catch(() => {})
+      .finally(() => {
+        if (this.live(run))
+          this.dispatch({ type: "mic-retry", status: "idle" });
+      });
+  }
+
+  private begin(
+    mode: Mode,
+    micInHand: MediaStream | null,
+    carry: readonly HistoryTurn[] | null = null,
+  ): void {
     const run = ++this.runId;
     const abort = new AbortController();
     this.res = {
@@ -191,7 +246,8 @@ export class VoiceSession {
 
     this.recorder = this.deps.createRecorder();
     this.recorder?.recordMeta({ event: "start", mode });
-    this.dispatch({ type: "reset" });
+    // A replacement session keeps the transcript on screen; a new chat starts clean.
+    this.dispatch({ type: carry ? "restart" : "reset" });
     this.dispatch({ type: "mode", mode, micIssue: null });
 
     let micRequest: Promise<MicResult> | null = null;
@@ -200,14 +256,16 @@ export class VoiceSession {
         type: "connection",
         connection: { status: "requestingMic" },
       });
-      micRequest = this.deps.requestMic();
+      micRequest = micInHand
+        ? Promise.resolve({ ok: true, stream: micInHand })
+        : this.deps.requestMic();
     } else {
       this.dispatch({
         type: "connection",
         connection: { status: "connecting", phase: "minting" },
       });
     }
-    this.run(run, abort.signal, micRequest).catch(() => {
+    this.run(run, abort.signal, micRequest, carry ?? []).catch(() => {
       // An unexpected throw must not leave the chat stuck on "connecting".
       if (this.live(run)) this.fail("session_connect_failed");
     });
@@ -296,6 +354,7 @@ export class VoiceSession {
     run: number,
     signal: AbortSignal,
     micRequest: Promise<MicResult> | null,
+    history: readonly HistoryTurn[],
   ): Promise<void> {
     let mic: MediaStream | null = null;
     if (micRequest) {
@@ -306,15 +365,7 @@ export class VoiceSession {
       }
       if (result.ok) {
         mic = result.stream;
-        this.res.mic = mic;
-        this.res.meter?.attach("mic", mic);
-        // The mic can disappear mid-chat (unplugged, revoked, taken by a call).
-        const tracks = mic.getAudioTracks();
-        const onEnded = () => this.onMicEnded(run);
-        for (const t of tracks) t.addEventListener("ended", onEnded);
-        this.res.micCleanup = () => {
-          for (const t of tracks) t.removeEventListener("ended", onEnded);
-        };
+        this.adoptMic(run, mic);
       } else {
         // No mic is not the end of the chat: carry on in text mode.
         this.dispatch({ type: "mode", mode: "text", micIssue: result.reason });
@@ -331,7 +382,7 @@ export class VoiceSession {
     });
     let minted: SessionResponse;
     try {
-      minted = await this.deps.mint(this.documentId, signal);
+      minted = await this.deps.mint(this.documentId, signal, history);
     } catch (err) {
       if (!this.live(run)) return;
       if (err instanceof MintError) this.fail(err.code, err.retryAfterSeconds);
@@ -382,6 +433,93 @@ export class VoiceSession {
 
     this.dispatch({ type: "connection", connection: { status: "connected" } });
     this.startTimers(minted.maxSessionSeconds);
+  }
+
+  // ---------------------------------------------------------------- mic
+
+  /** Takes ownership of a mic stream: cleanup() stops it from here on. */
+  private adoptMic(run: number, stream: MediaStream): void {
+    // A voice chat whose mic died still holds the dead stream.
+    this.res.micCleanup?.();
+    stopStream(this.res.mic);
+    this.res.mic = stream;
+    this.res.meter?.attach("mic", stream);
+    // The mic can disappear mid-chat (unplugged, revoked, taken by a call).
+    const tracks = stream.getAudioTracks();
+    const onEnded = () => this.onMicEnded(run);
+    for (const t of tracks) t.addEventListener("ended", onEnded);
+    this.res.micCleanup = () => {
+      for (const t of tracks) t.removeEventListener("ended", onEnded);
+    };
+  }
+
+  private async upgradeToVoice(run: number): Promise<void> {
+    const permission = await this.deps.queryMicPermission();
+    if (!this.live(run)) return;
+    if (permission === "denied") {
+      // getUserMedia would fail without a prompt; skip straight to the coach.
+      this.micRetryFailed("denied");
+      return;
+    }
+
+    const result = await this.deps.requestMic();
+    if (!this.live(run)) {
+      if (result.ok) stopStream(result.stream);
+      return;
+    }
+    if (!result.ok) {
+      this.micRetryFailed(result.reason);
+      return;
+    }
+
+    const transport = this.res.transport;
+    const stream = result.stream;
+    this.adoptMic(run, stream);
+    const upgraded = (await transport?.upgradeMic(stream)) ?? false;
+    if (!this.live(run)) return;
+    if (upgraded) {
+      this.recorder?.recordMeta({ event: "mic_upgraded" });
+      this.dispatch({ type: "mode", mode: "voice", micIssue: null });
+      return;
+    }
+    this.restartWithMic(stream);
+  }
+
+  private micRetryFailed(reason: MicFailure): void {
+    this.recorder?.recordMeta({ event: "mic_failed", reason });
+    this.dispatch({ type: "mic-retry-failed", reason });
+  }
+
+  /**
+   * The connection would not take the track. One new session with one new
+   * secret, and only now that the mic is known to work: the stream we already
+   * hold is carried over, so there is no second permission prompt and no
+   * second getUserMedia. The transcript stays on screen, and the turns so far
+   * go to the new session as history so the model has not forgotten them.
+   */
+  private restartWithMic(stream: MediaStream): void {
+    const history = this.visibleTurns();
+    // Out of cleanup's reach: the mic is the one thing worth keeping.
+    this.res.micCleanup?.();
+    this.res.micCleanup = null;
+    this.res.mic = null;
+    this.cleanup();
+    // Not inside a tap any more, but a page that is capturing the mic may
+    // start audio without one, so the new audio element still plays.
+    this.begin("voice", stream, history);
+    this.recorder?.recordMeta({ event: "mic_restart" });
+  }
+
+  /** The finished turns on screen, oldest first, as the mint wants them. */
+  private visibleTurns(): HistoryTurn[] {
+    const { order, items } = this.state;
+    return order.flatMap((id) => {
+      const item = items[id];
+      if (!item || (item.status !== "done" && item.status !== "interrupted")) {
+        return [];
+      }
+      return [{ role: item.role, text: item.text }];
+    });
   }
 
   // ------------------------------------------------------------- events
@@ -522,7 +660,12 @@ export class VoiceSession {
     this.finish(
       retryAfterSeconds === undefined
         ? { status: "failed", code }
-        : { status: "failed", code, retryAfterSeconds },
+        : {
+            status: "failed",
+            code,
+            retryAfterSeconds,
+            retryAt: this.deps.now() + retryAfterSeconds * 1000,
+          },
     );
   }
 

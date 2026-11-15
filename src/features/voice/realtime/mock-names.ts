@@ -10,6 +10,7 @@ export const MOCK_SCENARIOS = [
   "error",
   "unknown-event",
   "budget",
+  "grounding",
 ] as const;
 
 export type MockScenarioName = (typeof MOCK_SCENARIOS)[number];

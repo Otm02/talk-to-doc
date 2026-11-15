@@ -8,11 +8,9 @@ function setup(over: Partial<React.ComponentProps<typeof ControlBar>> = {}) {
     muted: false,
     canMute: true,
     speaking: false,
-    keyboardOpen: false,
-    keyboardLocked: false,
     onToggleMute: vi.fn(),
     onStopAnswer: vi.fn(),
-    onToggleKeyboard: vi.fn(),
+    onOpenKeyboard: vi.fn(),
     onEnd: vi.fn(),
     ...over,
   };
@@ -40,10 +38,11 @@ describe("ControlBar", () => {
     expect(p.onToggleMute).toHaveBeenCalled();
   });
 
-  it("disables Mute without a mic and the keyboard in text mode", () => {
-    setup({ canMute: false, keyboardLocked: true });
+  it("disables Mute without a live mic, and opens the keyboard on tap", () => {
+    const p = setup({ canMute: false });
     expect(screen.getByRole("button", { name: "Mute" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Keyboard" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Keyboard" }));
+    expect(p.onOpenKeyboard).toHaveBeenCalledTimes(1);
   });
 
   it("asks before ending", () => {

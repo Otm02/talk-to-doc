@@ -318,7 +318,7 @@ async function runScenario(name: MockScenarioName): Promise<RealtimeState> {
 
 describe("scenarios", () => {
   it("knows its own names", () => {
-    expect(MOCK_SCENARIOS).toHaveLength(8);
+    expect(MOCK_SCENARIOS).toHaveLength(9);
     expect(isMockScenario("barge-in")).toBe(true);
     expect(isMockScenario("nope")).toBe(false);
     expect(isMockScenario(null)).toBe(false);
@@ -358,6 +358,15 @@ describe("scenarios", () => {
     ]);
     expect(s.activity).toBe("listening");
     expect(s.usage.responses).toBe(2);
+  });
+
+  it("grounding: the spoken answer cites pages in the agreed format", async () => {
+    const s = await runScenario("grounding");
+    const answer = transcript(s).find(([role]) => role === "assistant");
+    expect(answer?.[1]).toBe("done");
+    expect(answer?.[2]).toContain("on page 2");
+    expect(answer?.[2]).toContain("pages 3 to 4");
+    expect(scenarioScript("grounding").textAnswer).toContain("Page 40");
   });
 
   it("text-turn: has no scripted steps; replies come from the reaction", async () => {
@@ -404,4 +413,50 @@ describe("scenarios", () => {
       }
     },
   );
+});
+
+describe("upgradeMic on the mock", () => {
+  const stream = {} as MediaStream;
+
+  async function live(script: Parameters<typeof scenarioScript>[0] | "fail") {
+    const t = new MockTransport(
+      script === "fail"
+        ? { steps: [], replyWith: "text", micUpgrade: "fail" }
+        : scenarioScript(script),
+    );
+    const raw: string[] = [];
+    t.onEvent((r) => raw.push(r));
+    const p = t.connect({ clientSecret: "ek_x", micStream: null });
+    await vi.advanceTimersByTimeAsync(200);
+    await p;
+    return { t, raw };
+  }
+
+  it("refuses before it is connected", async () => {
+    const t = new MockTransport({ steps: [] });
+    await expect(t.upgradeMic(stream)).resolves.toBe(false);
+    expect(t.micUpgrades).toEqual([]);
+  });
+
+  it("accepts the mic and answers out loud from then on", async () => {
+    const { t, raw } = await live("text-turn");
+    await expect(t.upgradeMic(stream)).resolves.toBe(true);
+    expect(t.micUpgrades).toEqual([stream]);
+
+    // The session default (audio) now applies to a plain response.create.
+    t.send({ type: "response.create", event_id: "evt_1" });
+    await vi.advanceTimersByTimeAsync(2000);
+    const types = raw.map((r) => JSON.parse(r).type as string);
+    expect(types).toContain("output_audio_buffer.started");
+    expect(types).toContain("response.output_audio_transcript.done");
+    t.close();
+  });
+
+  it("can be scripted to refuse", async () => {
+    const { t } = await live("fail");
+    await expect(t.upgradeMic(stream)).resolves.toBe(false);
+    // The attempt is still on record, so a test can see it was tried once.
+    expect(t.micUpgrades).toEqual([stream]);
+    t.close();
+  });
 });

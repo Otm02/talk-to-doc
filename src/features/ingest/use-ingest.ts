@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { PageLine, SegmentLine } from "@/lib/wire/ingest";
 import { IngestError, isAbortError } from "./ingest-error";
-import { initialIngestState, ingestReducer, type IngestRequest } from "./ingest-state";
+import {
+  initialIngestState,
+  ingestReducer,
+  type IngestRequest,
+} from "./ingest-state";
 import { checkPdfFile } from "./validate-pdf";
 import { readIngestEvents } from "./ndjson-reader";
 import { getUploadMode, ingestPdf, ingestYoutube } from "./upload-client";
@@ -44,6 +48,7 @@ export function useIngest() {
 
     try {
       let stream: ReadableStream<Uint8Array>;
+      let fileName: string | undefined;
       if (request.kind !== "youtube") {
         let file: File;
         if (request.kind === "pdf") {
@@ -51,7 +56,8 @@ export function useIngest() {
         } else {
           dispatch({ type: "upload-start", fileName: request.name, size: 0 });
           const res = await fetch(request.url, { signal }).catch(() => null);
-          if (!res?.ok) throw new IngestError("upload_failed", "Sample missing");
+          if (!res?.ok)
+            throw new IngestError("upload_failed", "Sample missing");
           file = new File([await res.blob()], request.name, {
             type: "application/pdf",
           });
@@ -59,12 +65,18 @@ export function useIngest() {
         // Same checks as the server, so a bad file never leaves the phone.
         const check = checkPdfFile(file);
         if (!check.ok) throw new IngestError(check.code, check.code);
-        dispatch({ type: "upload-start", fileName: file.name, size: file.size });
+        dispatch({
+          type: "upload-start",
+          fileName: file.name,
+          size: file.size,
+        });
+        fileName = file.name;
         const mode = await getUploadMode();
         stream = await ingestPdf(file, mode, signal, {
           onUploadProgress: (percent) =>
             !signal.aborted && dispatch({ type: "upload-progress", percent }),
-          onUploaded: () => !signal.aborted && dispatch({ type: "extract-start" }),
+          onUploaded: () =>
+            !signal.aborted && dispatch({ type: "extract-start" }),
         });
       } else {
         dispatch({ type: "extract-start" });
@@ -72,12 +84,13 @@ export function useIngest() {
       }
       dispatch({ type: "extract-start" });
 
-      const incomplete = request.kind !== "youtube" ? "upload_failed" : "youtube_failed";
+      const incomplete =
+        request.kind !== "youtube" ? "upload_failed" : "youtube_failed";
       for await (const event of readIngestEvents(stream, incomplete)) {
         if (signal.aborted) return;
         switch (event.type) {
           case "meta":
-            dispatch({ type: "meta", meta: event.meta });
+            dispatch({ type: "meta", meta: event.meta, fileName });
             break;
           case "page":
             pages.push(event.page);
@@ -109,6 +122,11 @@ export function useIngest() {
           type: "fail",
           code: error.code,
           retryAfterSeconds: error.retryAfterSeconds,
+          // Fixed now, so the countdown reads the clock and cannot drift.
+          retryAt:
+            error.retryAfterSeconds === undefined
+              ? undefined
+              : Date.now() + error.retryAfterSeconds * 1000,
         });
       } else {
         dispatch({ type: "fail", code: "internal" });
@@ -116,7 +134,10 @@ export function useIngest() {
     }
   }, []);
 
-  const startPdf = useCallback((file: File) => run({ kind: "pdf", file }), [run]);
+  const startPdf = useCallback(
+    (file: File) => run({ kind: "pdf", file }),
+    [run],
+  );
   const startSamplePdf = useCallback(
     (url: string, name: string) => run({ kind: "pdf-sample", url, name }),
     [run],
@@ -137,5 +158,13 @@ export function useIngest() {
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
-  return { state, startPdf, startSamplePdf, startYoutube, retry, cancel, reset };
+  return {
+    state,
+    startPdf,
+    startSamplePdf,
+    startYoutube,
+    retry,
+    cancel,
+    reset,
+  };
 }
