@@ -33,6 +33,10 @@ export function useVoiceSession(
     () => ({
       start: (mode: Mode) => session.start(mode),
       end: () => session.end(),
+      /** "Reconnect" on Connection lost: one new session, transcript kept. Call it from the tap. */
+      reconnect: () => session.reconnect(),
+      /** "Switch to text" on Connection lost: same, without a microphone. */
+      switchToText: () => session.switchToText(),
       /** Text chat to voice chat, in place. Call it straight from the tap. */
       enableMic: () => session.enableMic(),
       setMuted: (muted: boolean) => session.setMuted(muted),

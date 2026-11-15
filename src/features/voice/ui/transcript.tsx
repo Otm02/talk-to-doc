@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDown } from "lucide-react";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type {
   ReferenceIndex,
   ReferenceTarget,
@@ -9,6 +9,22 @@ import type {
 import type { RealtimeState } from "../realtime/state";
 import { Bubble } from "./bubble";
 import { useStickToBottom } from "./use-stick-to-bottom";
+
+/** A line across the conversation where a lost connection was rebuilt. */
+function ReconnectedDivider() {
+  return (
+    <li
+      role="separator"
+      aria-label="Reconnected"
+      data-testid="reconnected-divider"
+      className="flex items-center gap-2 py-1 text-xs font-medium text-muted-foreground"
+    >
+      <span aria-hidden className="h-px flex-1 bg-border" />
+      Reconnected
+      <span aria-hidden className="h-px flex-1 bg-border" />
+    </li>
+  );
+}
 
 export function Transcript({
   state,
@@ -66,18 +82,31 @@ export function Transcript({
                 {empty}
               </li>
             )}
-            {state.order.map((id) => {
+            {state.order.map((id, i) => {
               const item = state.items[id];
-              return item ? (
-                <Bubble
-                  key={id}
-                  item={item}
-                  onRetry={onRetry}
-                  references={references}
-                  onOpenReference={onOpenReference}
-                />
-              ) : null;
+              if (!item) return null;
+              const prev = state.items[state.order[i - 1] ?? ""];
+              // The first item of a session that began with a reconnect.
+              const divider =
+                state.reconnectMarks.includes(item.epoch) &&
+                prev?.epoch !== item.epoch;
+              return (
+                <Fragment key={id}>
+                  {divider && <ReconnectedDivider />}
+                  <Bubble
+                    item={item}
+                    onRetry={onRetry}
+                    references={references}
+                    onOpenReference={onOpenReference}
+                  />
+                </Fragment>
+              );
             })}
+            {/* Reconnected, and nothing said yet in the new session. */}
+            {state.reconnectMarks.includes(state.epoch) &&
+              !state.order.some(
+                (id) => state.items[id]?.epoch === state.epoch,
+              ) && <ReconnectedDivider />}
           </ol>
         </div>
       </div>

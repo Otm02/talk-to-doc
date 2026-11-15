@@ -240,21 +240,26 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 ## M9 Network resilience
 
 **Scope**
-- Reconnect per ARCHITECTURE §5.4: 5 s grace on `disconnected`, reconnect on `failed`, on channel close or when offline, backoff 1/2/4 s, 3 attempts, same session record, transcript carried in the `conversation_so_far` fence.
-- Offline banner from `navigator.onLine` and `online`/`offline` events; wait for `online` before re-minting.
-- Mint retries with jitter for 5xx and timeouts only; billing and guard errors never retried.
-- Ingest: retry with the same idempotency key when a stream ends without `done`; upload Retry after an aborted PUT.
-- **[LIVE: ask first, ~$0.10]** airplane mode for 5 s and 30 s, and a Wi-Fi to cellular switch (MC-5).
+- Reconnect per ARCHITECTURE §5.4, as a pure state machine (`reconnect.ts`): 8 s grace on `disconnected`; a new session on `failed`, a closed channel, a session-expired error or the end of grace; at most 3 attempts with backoff 0 / 2 / 4 s, carried across drops within a 30 s stability window and capped at 6 reconnect mints per chat; the transcript carried in the `conversation_so_far` fence; a "Reconnected" divider; then "Connection lost" with Reconnect and Switch to text.
+- Every reconnect mint counts against `DAILY_SESSION_CAP` (this replaces the earlier "reconnects do not count": the server cannot tell them apart without a replayable token).
+- Offline: banner from `navigator.onLine` plus requests that got no answer; nothing is minted while offline, the wait costs no attempt, and a load that failed for lack of an answer resumes once by itself.
+- A 429 mid-reconnect is a Cooldown with M8's live countdown and one more attempt at 0; `voice_disabled`, `daily_limit` and `budget_exhausted` never reconnect.
+- HTTP: deadlines on every call; one retry with jitter for idempotent calls only (health, sample, YouTube ingest); never for a mint or a consumed upload.
+- Slow upload: 20 s with no progress shows "Connection is slow" with Cancel and Keep waiting. A stream that stalls or breaks keeps the pages received and offers Try again.
+- A dead mic track is re-acquired once and swapped in with `replaceTrack` (no new secret).
+- An expired document offers Load it again from the source still in memory.
+- **[LIVE: ask first, ~$0.10]** airplane mode for 5 s and 30 s, and a Wi-Fi to cellular switch (MC-5); the manual list is ARCHITECTURE §10.2.
 
 **Acceptance criteria**
-- [ ] A 5 s drop recovers without a new session; a 30 s drop reconnects with the transcript intact; a permanent drop ends in `session_reconnect_failed` with Retry.
-- [ ] A broken ingest stream recovers without the user doing anything.
-- [ ] A reconnect does not count against `DAILY_SESSION_CAP`.
+- [ ] A 5 s drop recovers without a new session; a 30 s drop reconnects with the transcript intact and exactly one new secret; a permanent drop ends in "Connection lost" with Reconnect and Switch to text.
+- [ ] A broken YouTube stream recovers without the user doing anything; a broken PDF stream keeps its pages and offers Try again.
+- [ ] A 429 during a reconnect shows Cooldown, counts down and resumes at 0 without a loop.
+- [ ] Every reconnect mint counts against `DAILY_SESSION_CAP`.
 
 **Tests**
-- [ ] `reconnect.test.ts` (mock transport): grace recovery, failed → reconnect, 3 failures, offline wait, billing error during reconnect.
-- [ ] `e2e/network.spec.ts`: `context.setOffline` mid-session, aborted NDJSON route, throttled upload via CDP (Chromium), offline banner.
-- [ ] Session service test: reconnect reuses the session record and caps the transcript excerpt.
+- [x] `reconnect.test.ts` (the machine, fake timers): grace recovery, failed → reconnect, backoff, 3 failures, offline wait, 429 mid-reconnect, terminal codes.
+- [x] `session.reconnect.test.ts` (controller on MockTransport): a full reconnect mints exactly one secret; mic re-acquire; first start offline.
+- [x] `e2e/network.spec.ts`: scripted drop, failed and recovery on the mock transport, route aborts and cut streams, offline, and a stalled upload.
 
 ## M10 Security and cost guard
 

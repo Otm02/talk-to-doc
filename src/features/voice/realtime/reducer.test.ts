@@ -790,9 +790,15 @@ describe("connection", () => {
 
   it("refuses jumps that would be bugs", () => {
     expect(to(initialState, { status: "connected" })).toBe(initialState);
-    expect(to(initialState, { status: "reconnecting", since: 1 })).toBe(
-      initialState,
-    );
+    expect(
+      to(initialState, {
+        status: "reconnecting",
+        since: 1,
+        phase: "grace",
+        attempt: 0,
+        maxAttempts: 3,
+      }),
+    ).toBe(initialState);
     expect(to(initialState, { status: "failed", code: "internal" })).toBe(
       initialState,
     );
@@ -803,7 +809,13 @@ describe("connection", () => {
   });
 
   it("enters and leaves reconnecting without losing the transcript", () => {
-    let s = to(midAnswer(), { status: "reconnecting", since: 10 });
+    let s = to(midAnswer(), {
+      status: "reconnecting",
+      since: 10,
+      phase: "grace",
+      attempt: 0,
+      maxAttempts: 3,
+    });
     expect(s.connection.status).toBe("reconnecting");
     expect(s.order).toHaveLength(2);
     s = to(s, { status: "connected" });
@@ -861,7 +873,11 @@ describe("connection", () => {
       to(ended, { status: "connecting", phase: "minting" }).connection.status,
     ).toBe("connecting");
     expect(to(ended, { status: "idle" }).connection.status).toBe("idle");
-    expect(reducer(ended, { type: "reset" })).toBe(initialState);
+    // A new chat is a new chatSeq, so its timer starts over.
+    expect(reducer(ended, { type: "reset" })).toEqual({
+      ...initialState,
+      chatSeq: ended.chatSeq + 1,
+    });
   });
 
   it("starts a new epoch on every session.created", () => {
@@ -1071,6 +1087,63 @@ describe("retrying the microphone", () => {
       type: "mic-retry-failed",
       reason: "denied",
     });
-    expect(reducer(s, { type: "reset" })).toBe(initialState);
+    expect(reducer(s, { type: "reset" })).toEqual({
+      ...initialState,
+      chatSeq: s.chatSeq + 1,
+    });
+  });
+});
+
+describe("reconnecting", () => {
+  const to = (s: RealtimeState, connection: RealtimeState["connection"]) =>
+    reducer(s, { type: "connection", connection });
+  const grace = {
+    status: "reconnecting",
+    since: 1,
+    phase: "grace",
+    attempt: 0,
+    maxAttempts: 3,
+  } as const;
+
+  it("moves from one phase to the next without leaving 'reconnecting'", () => {
+    let s = to(midAnswer(), grace);
+    s = to(s, { ...grace, phase: "minting", attempt: 1 });
+    expect(s.connection).toMatchObject({ phase: "minting", attempt: 1 });
+    s = to(s, { ...grace, phase: "cooldown", attempt: 1, retryAt: 99 });
+    expect(s.connection).toMatchObject({ phase: "cooldown", retryAt: 99 });
+  });
+
+  it("settles what was mid-flight on the dead session, and keeps the transcript", () => {
+    const before = to(midAnswer(), grace);
+    const after = reducer(before, { type: "reconnect-settle" });
+    expect(after.connection.status).toBe("reconnecting");
+    expect(after.response).toEqual({ activeId: null, audioId: null });
+    expect(after.pending).toEqual({});
+    expect(after.activity).toBe("listening");
+    expect(after.order).toEqual(before.order);
+    expect(
+      Object.values(after.items).some((i) => i.status === "streaming"),
+    ).toBe(false);
+  });
+
+  it("marks the epoch of a reconnected session once", () => {
+    let s = play([ev.sessionCreated()], connected());
+    s = reducer(s, { type: "reconnected" });
+    s = reducer(s, { type: "reconnected" });
+    expect(s.reconnectMarks).toEqual([s.epoch]);
+  });
+
+  it("keeps the marks and counts a new chat when the transcript is carried over", () => {
+    let s = play([ev.sessionCreated()], connected());
+    s = reducer(s, { type: "reconnected" });
+    const next = reducer(s, { type: "restart" });
+    expect(next.reconnectMarks).toEqual(s.reconnectMarks);
+    expect(next.chatSeq).toBe(s.chatSeq + 1);
+  });
+
+  it("forgets the marks for a brand new chat", () => {
+    let s = play([ev.sessionCreated()], connected());
+    s = reducer(s, { type: "reconnected" });
+    expect(reducer(s, { type: "reset" }).reconnectMarks).toEqual([]);
   });
 });

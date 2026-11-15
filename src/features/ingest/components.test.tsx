@@ -7,6 +7,7 @@ import type { DocumentData } from "./ingest-state";
 import { ErrorCard } from "./error-card";
 import { PdfPicker } from "./pdf-picker";
 import { SourceSwitch } from "./source-switch";
+import { PartialNotice, partialSummary } from "./partial-notice";
 import { UploadStatus } from "./upload-status";
 import { YoutubeField } from "./youtube-field";
 
@@ -165,6 +166,7 @@ describe("UploadStatus", () => {
           fileName: "a.pdf",
           size: 2048,
           percent: 42,
+          stalled: false,
         }}
         source="pdf"
         onCancel={onCancel}
@@ -197,6 +199,26 @@ describe("UploadStatus", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Reading page 37 of 120…",
     );
+  });
+});
+
+describe("DocumentCard: a load that stopped", () => {
+  const doc = {
+    meta: { documentId: "d", title: "T", sourceType: "pdf", pages: 120 },
+    pages: [],
+    segments: [],
+    done: null,
+  } as unknown as DocumentData;
+
+  it("says Counting… while the load is going", () => {
+    render(<DocumentCard doc={doc} />);
+    expect(screen.getByText(/Counting…/)).toBeInTheDocument();
+  });
+
+  it("does not promise counts that will not come", () => {
+    render(<DocumentCard doc={doc} interrupted />);
+    expect(screen.queryByText(/Counting…/)).toBeNull();
+    expect(screen.getByText("120 pages")).toBeInTheDocument();
   });
 });
 
@@ -286,5 +308,117 @@ describe("DocumentCard", () => {
     expect(
       await screen.findByText(/limited amount of text/),
     ).toBeInTheDocument();
+  });
+});
+
+describe("UploadStatus: a slow link", () => {
+  const uploading = (percent: number, stalled: boolean) =>
+    ({
+      status: "uploading",
+      fileName: "big.pdf",
+      size: 20_000_000,
+      percent,
+      stalled,
+    }) as const;
+
+  it("says Connection is slow, keeps the real percent, and offers Cancel and Keep waiting", async () => {
+    const onCancel = vi.fn();
+    const onKeepWaiting = vi.fn();
+    render(
+      <UploadStatus
+        state={uploading(37, true)}
+        source="pdf"
+        onCancel={onCancel}
+        onKeepWaiting={onKeepWaiting}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Connection is slow");
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "37",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Keep waiting" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onKeepWaiting).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers only Cancel while the upload is moving", () => {
+    render(
+      <UploadStatus
+        state={uploading(37, false)}
+        source="pdf"
+        onCancel={vi.fn()}
+        onKeepWaiting={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Uploading…");
+    expect(screen.queryByRole("button", { name: "Keep waiting" })).toBeNull();
+  });
+
+  it("does not claim more than it knows at 100%", () => {
+    render(
+      <UploadStatus
+        state={uploading(100, false)}
+        source="pdf"
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Finishing upload…");
+  });
+});
+
+describe("PartialNotice", () => {
+  const pdf = {
+    meta: {
+      documentId: "d",
+      title: "T",
+      sourceType: "pdf",
+      pages: 120,
+    },
+    pages: Array.from({ length: 37 }, (_, i) => ({ page: i + 1, text: "x" })),
+    segments: [],
+    done: null,
+  } as unknown as DocumentData;
+
+  it("says how much arrived, and offers Try again and Start over", async () => {
+    const onRetry = vi.fn();
+    const onStartOver = vi.fn();
+    render(
+      <PartialNotice doc={pdf} onRetry={onRetry} onStartOver={onStartOver} />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The connection dropped. You have 37 of 120 pages.",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await userEvent.click(screen.getByRole("button", { name: "Start over" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onStartOver).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts a video in time", () => {
+    const video = {
+      meta: {
+        documentId: "d",
+        title: "T",
+        sourceType: "youtube",
+        durationSec: 4320,
+      },
+      pages: [],
+      segments: [{ startSec: 600, text: "x" }],
+      done: null,
+    } as unknown as DocumentData;
+    expect(partialSummary(video)).toBe(
+      "You have about the first 10 min of 1 h 12 min.",
+    );
+    expect(
+      partialSummary({
+        ...video,
+        segments: [{ startSec: 0, text: "x" }],
+      } as DocumentData),
+    ).toBe("You have only the start of the captions.");
+    expect(partialSummary({ ...video, segments: [] })).toBe(
+      "None of the captions arrived.",
+    );
   });
 });

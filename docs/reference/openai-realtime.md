@@ -250,7 +250,7 @@ Sources: https://developers.openai.com/api/docs/guides/voice-latency-cost?api=re
 ## 5. Limits
 
 - Context window 128k tokens, max output 32k (model pages). Instructions count against context.
-- **Max session length: 60 minutes.**
+- **Max session length: 60 minutes.** The docs name no error code for a session that has expired or been ended by the server (checked 2026-11-15 against the Realtime conversations guide). The client treats `session_expired` as one (`SESSION_EXPIRED_CODES` in `session.ts`), **UNVERIFIED**: the same reconnect road also catches the data channel closing, which is what a server-side end looks like in practice. With `MAX_SESSION_MINUTES` at 5 it should not occur.
 - Client secret TTL 10 to 7200 s, default 600 (section 1).
 - Instruction size limit: **not documented** (UNVERIFIED). Enforce our own cap via the token-budget in `src/server/context`, and leave headroom for conversation history and output.
 - Truncation: when input exceeds the context, oldest items drop (`truncation: "auto"`). With `"disabled"` the API errors instead.

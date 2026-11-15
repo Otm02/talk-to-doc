@@ -1,15 +1,22 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { publicEnv } from "@/lib/public-env";
 import { LevelMeter } from "./levels";
 import { MockTransport } from "./mock-transport";
 import { EventRecorder } from "./recorder";
 import { createBrowserDeps } from "./session-deps";
+
+// The unit-test build is a dev build, not a mock build: flip the flag per test.
+vi.mock("@/lib/public-env", () => ({
+  publicEnv: { isDev: true, realtimeTransport: "webrtc" as "webrtc" | "mock" },
+}));
 
 function at(search: string) {
   window.history.replaceState({}, "", `/${search}`);
 }
 
 afterEach(() => {
+  (publicEnv as { realtimeTransport: string }).realtimeTransport = "webrtc";
   at("");
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
@@ -122,5 +129,35 @@ describe("createBrowserDeps", () => {
     off();
     document.dispatchEvent(new Event("visibilitychange"));
     expect(listener).toHaveBeenCalledOnce();
+  });
+});
+
+describe("createBrowserDeps: ?mockMint=route", () => {
+  const sessionBody = {
+    clientSecret: "s",
+    expiresAt: 0,
+    model: "gpt-realtime-2.1-mini",
+    maxSessionSeconds: 300,
+  };
+
+  it("in a mock build sends the mint through the real client, so a route can answer it", async () => {
+    (publicEnv as { realtimeTransport: string }).realtimeTransport = "mock";
+    at("?mockRealtime=normal-turn&mockMint=route");
+    const f = vi.fn(async () => Response.json(sessionBody));
+    vi.stubGlobal("fetch", f);
+    await createBrowserDeps().mint("doc", new AbortController().signal);
+    expect(f).toHaveBeenCalledWith("/api/realtime/session", expect.anything());
+  });
+
+  it("in a dev build it stays mocked: the real route would be a live OpenAI call", async () => {
+    at("?mockRealtime=normal-turn&mockMint=route");
+    const f = vi.fn();
+    vi.stubGlobal("fetch", f);
+    const out = await createBrowserDeps().mint(
+      "doc",
+      new AbortController().signal,
+    );
+    expect(out).toMatchObject({ clientSecret: "mock-secret" });
+    expect(f).not.toHaveBeenCalled();
   });
 });

@@ -66,10 +66,37 @@ export function statusInfo(state: RealtimeState, online = true): PillInfo {
     case "idle":
       return { kind: "ready", label: "Ready", tone: "neutral" };
     case "requestingMic":
-    case "connecting":
       return { kind: "connecting", label: "Connecting", tone: "neutral" };
-    case "reconnecting":
-      return { kind: "reconnecting", label: "Reconnecting", tone: "warning" };
+    case "connecting":
+      // A first start whose mint got no answer: said as it is, not as "Connecting".
+      return c.phase === "waitingNetwork"
+        ? { kind: "offline", label: "Offline", tone: "warning" }
+        : { kind: "connecting", label: "Connecting", tone: "neutral" };
+    case "reconnecting": {
+      const phase = c.phase;
+      switch (phase) {
+        // Nothing is minted while the device has no link.
+        case "waitingNetwork":
+          return { kind: "offline", label: "Offline", tone: "warning" };
+        // A 429 on the way back: the same word as for any other 429.
+        case "cooldown":
+          return { kind: "cooldown", label: "Cooldown", tone: "warning" };
+        // The count is in the line under the header (ReconnectNotice), not the pill.
+        case "grace":
+        case "backoff":
+        case "minting":
+        case "connecting":
+          return {
+            kind: "reconnecting",
+            label: "Reconnecting",
+            tone: "warning",
+          };
+        default: {
+          const unreachable: never = phase;
+          return unreachable;
+        }
+      }
+    }
     case "failed":
       return failedInfo(c.code, online);
     case "ended":

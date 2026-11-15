@@ -6,6 +6,7 @@ import { TextPreview } from "@/features/document/text-preview";
 import { VoiceChat } from "@/features/voice/ui/voice-chat";
 import { ErrorCard } from "./error-card";
 import type { RecoveryAction } from "./error-copy";
+import { PartialNotice } from "./partial-notice";
 import { PdfPicker } from "./pdf-picker";
 import { SAMPLE_PDF, SAMPLE_VIDEO_URL, SampleChips } from "./sample-chips";
 import { SourceSwitch, type Source } from "./source-switch";
@@ -52,14 +53,16 @@ export function IngestScreen() {
   }
 
   const doc =
-    state.status === "ready" || state.status === "extracting"
+    state.status === "ready" ||
+    state.status === "extracting" ||
+    state.status === "partial"
       ? state.doc
       : null;
 
   if (doc) {
     const view = (
       <div className="flex flex-1 flex-col gap-4">
-        <DocumentCard doc={doc} />
+        <DocumentCard doc={doc} interrupted={state.status === "partial"} />
         {state.status === "extracting" && (
           <UploadStatus
             state={state}
@@ -67,12 +70,24 @@ export function IngestScreen() {
             onCancel={ingest.cancel}
           />
         )}
+        {state.status === "partial" && (
+          <PartialNotice
+            doc={doc}
+            onRetry={ingest.retry}
+            onStartOver={() => startOver()}
+          />
+        )}
         <TextPreview doc={doc} />
       </div>
     );
     if (state.status !== "ready") return view;
     return (
-      <VoiceChat doc={doc} onUseAnother={() => startOver()}>
+      <VoiceChat
+        doc={doc}
+        onUseAnother={() => startOver()}
+        // The file or link is still in memory: loading it again is one tap.
+        onReloadSource={ingest.retry}
+      >
         {view}
       </VoiceChat>
     );
@@ -92,7 +107,12 @@ export function IngestScreen() {
       <SourceSwitch value={source} onChange={setSource} disabled={working} />
 
       {working ? (
-        <UploadStatus state={state} source={source} onCancel={ingest.cancel} />
+        <UploadStatus
+          state={state}
+          source={source}
+          onCancel={ingest.cancel}
+          onKeepWaiting={ingest.keepWaiting}
+        />
       ) : source === "pdf" ? (
         <PdfPicker
           inputRef={fileInputRef}

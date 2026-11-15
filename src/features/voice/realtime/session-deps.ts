@@ -1,3 +1,5 @@
+import { isOffline, waitForConnection } from "@/lib/net/connectivity";
+import { publicEnv } from "@/lib/public-env";
 import type { SessionResponse } from "@/lib/wire/session";
 import {
   createAudioContext,
@@ -43,10 +45,21 @@ function mockMint(): Promise<SessionResponse> {
   });
 }
 
+function routesMint(): boolean {
+  return (
+    publicEnv.realtimeTransport === "mock" &&
+    new URLSearchParams(search()).get("mockMint") === "route"
+  );
+}
+
 export function createBrowserDeps(): SessionDeps {
   return {
     mint: (documentId, signal, history) =>
-      mockScenarioFromSearch(search())
+      // ?mockMint=route sends the mock chat's mint through the real client, so
+      // a Playwright route can count the requests and answer them (429 ...).
+      // Only in a mock build: in `pnpm dev` it would reach the real session
+      // route, which is a live OpenAI call.
+      mockScenarioFromSearch(search()) && !routesMint()
         ? mockMint()
         : mintSession(documentId, signal, undefined, history),
     requestMic: () => requestMic(),
@@ -58,6 +71,8 @@ export function createBrowserDeps(): SessionDeps {
     createLevelMeter: (audioContext) => new LevelMeter({ audioContext }),
     createRecorder: () => (isDebug(search()) ? new EventRecorder() : null),
     now: () => Date.now(),
+    isOffline: () => isOffline(),
+    waitForConnection: (signal) => waitForConnection(signal),
     isDebug: () => isDebug(search()),
     visibility: {
       isHidden: () => document.visibilityState === "hidden",

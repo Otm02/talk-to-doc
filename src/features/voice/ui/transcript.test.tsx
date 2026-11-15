@@ -173,3 +173,63 @@ describe("Transcript", () => {
     expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
   });
 });
+
+describe("Transcript: the Reconnected divider", () => {
+  beforeEach(() => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+  });
+
+  const dividers = () => screen.queryAllByTestId("reconnected-divider");
+
+  it("draws one line before the first item of a reconnected session", () => {
+    const base = stateWith(
+      item("u1", { role: "user", text: "Hi", epoch: 1 }),
+      item("a1", { text: "Hello", epoch: 1 }),
+      item("u2", { role: "user", text: "Still there?", epoch: 2 }),
+      item("a2", { text: "Yes", epoch: 2 }),
+    );
+    render(
+      <Transcript
+        state={{ ...base, epoch: 2, reconnectMarks: [2] }}
+        onRetry={vi.fn()}
+        empty=""
+      />,
+    );
+    expect(dividers()).toHaveLength(1);
+    expect(
+      screen.getByRole("separator", { name: "Reconnected" }),
+    ).toBeInTheDocument();
+    const list = screen.getByTestId("transcript").querySelector("ol");
+    const order = [...(list?.children ?? [])].map(
+      (el) => el.getAttribute("data-testid") ?? el.textContent,
+    );
+    // The divider sits between the old session and the new one.
+    expect(order.indexOf("reconnected-divider")).toBe(2);
+  });
+
+  it("shows the line at the bottom while the new session has said nothing yet", () => {
+    const base = stateWith(item("u1", { role: "user", text: "Hi", epoch: 1 }));
+    render(
+      <Transcript
+        state={{ ...base, epoch: 2, reconnectMarks: [2] }}
+        onRetry={vi.fn()}
+        empty=""
+      />,
+    );
+    expect(dividers()).toHaveLength(1);
+  });
+
+  it("draws none for a chat that never reconnected", () => {
+    render(
+      <Transcript
+        state={{
+          ...stateWith(item("a1", { text: "Hello", epoch: 1 })),
+          epoch: 1,
+        }}
+        onRetry={vi.fn()}
+        empty=""
+      />,
+    );
+    expect(dividers()).toHaveLength(0);
+  });
+});

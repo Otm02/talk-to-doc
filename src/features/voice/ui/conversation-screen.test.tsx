@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeHarness, type HarnessOptions } from "@test/realtime/harness";
 import type { DocumentData } from "@/features/ingest/ingest-state";
+import { OfflineBanner } from "@/components/offline-banner";
 import { MintError } from "../realtime/mint";
 import { scenarioScript } from "../realtime/mock-scenarios";
 import { MIC_RETRY_MIN_MS } from "../realtime/session";
@@ -65,7 +66,11 @@ const layout = () =>
 describe("ConversationScreen", () => {
   // The first start normally comes from the document screen's buttons; here a
   // plain button stands in for them, wired to the same session as the screen.
-  async function start(mode: Mode, options: HarnessOptions = {}) {
+  async function start(
+    mode: Mode,
+    options: HarnessOptions = {},
+    onReloadSource?: () => void,
+  ) {
     const h = makeHarness(options);
     const onClose = vi.fn();
     function Auto() {
@@ -75,10 +80,13 @@ describe("ConversationScreen", () => {
           <button onClick={() => session.actions.start(mode)}>
             test-start
           </button>
+          {/* The page behind the chat, as AppShell renders it. */}
+          <OfflineBanner hideWhenChatOpen />
           <ConversationScreen
             doc={DOC}
             session={session}
             onStart={(m: Mode) => session.actions.start(m)}
+            onReloadSource={onReloadSource}
             onEnd={() => session.actions.end()}
             onClose={onClose}
           />
@@ -407,6 +415,141 @@ describe("ConversationScreen", () => {
       });
       act(() => void window.dispatchEvent(new Event("offline")));
       expect(pill()).toHaveTextContent("Offline");
+    });
+  });
+
+  describe("when the connection is lost", () => {
+    async function lost() {
+      const r = await start("voice", { script: scenarioScript("normal-turn") });
+      await settle(3_000);
+      expect(screen.getAllByTestId(/^item-(user|assistant)$/)).toHaveLength(2);
+      r.h.mint.mockRejectedValue(new MintError("session_connect_failed"));
+      r.h.transport.emitState("failed");
+      await settle(15_000);
+      return r;
+    }
+
+    it("offers Reconnect and Switch to text, and keeps the transcript on screen", async () => {
+      await lost();
+      expect(screen.getByTestId("failure-card")).toHaveAttribute(
+        "data-code",
+        "session_reconnect_failed",
+      );
+      expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
+      expect(
+        screen.getByRole("button", { name: "Switch to text" }),
+      ).toBeEnabled();
+      expect(screen.getAllByTestId(/^item-(user|assistant)$/)).toHaveLength(2);
+    });
+
+    it("Reconnect goes on with the same conversation, with a Reconnected divider", async () => {
+      const { h } = await lost();
+      const minted = h.mint.mock.calls.length;
+      h.mint.mockReset();
+      h.mint.mockResolvedValue(h.response);
+      tap("Reconnect");
+      await settle(200);
+      expect(h.mint).toHaveBeenCalledOnce();
+      expect(h.mint.mock.calls[0]?.[2]).toHaveLength(2);
+      expect(minted).toBeGreaterThan(1);
+      expect(screen.queryByTestId("failure-card")).toBeNull();
+      expect(screen.getByTestId("reconnected-divider")).toBeInTheDocument();
+      expect(
+        screen.getAllByTestId(/^item-(user|assistant)$/).length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+
+    it("Switch to text carries on in text, with the transcript and the composer", async () => {
+      const { h } = await lost();
+      h.mint.mockReset();
+      h.mint.mockResolvedValue(h.response);
+      tap("Switch to text");
+      await settle(200);
+      expect(screen.getByPlaceholderText("Ask a question")).toBeInTheDocument();
+      expect(screen.queryByTestId("failure-card")).toBeNull();
+      expect(
+        screen.getAllByTestId(/^item-(user|assistant)$/).length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+
+    it("after a third 429 the countdown ends in a Retry that keeps the conversation, not a restart", async () => {
+      const r = await start("voice", { script: scenarioScript("normal-turn") });
+      await settle(3_000);
+      r.h.mint.mockRejectedValue(new MintError("rate_limited", 5));
+      r.h.transport.emitState("failed");
+      await settle(20_000);
+      const card = screen.getByTestId("failure-card");
+      expect(card).toHaveAttribute("data-code", "rate_limited");
+      expect(screen.getAllByTestId(/^item-(user|assistant)$/)).toHaveLength(2);
+
+      r.h.mint.mockReset();
+      r.h.mint.mockResolvedValue(r.h.response);
+      const retry = screen.getByTestId("retry-button");
+      expect(retry).toBeEnabled();
+      fireEvent.click(retry);
+      await settle(200);
+      // The conversation went up as history; nothing was wiped.
+      expect(r.h.mint.mock.calls[0]?.[2]).toHaveLength(2);
+      expect(
+        screen.getAllByTestId(/^item-(user|assistant)$/).length,
+      ).toBeGreaterThanOrEqual(2);
+    });
+
+    it("a first start that is refused still starts over: there is nothing to keep", async () => {
+      const r = await start("voice", {
+        mintError: new MintError("rate_limited", 3),
+      });
+      expect(screen.getByTestId("failure-card")).toHaveAttribute(
+        "data-code",
+        "rate_limited",
+      );
+      r.h.mint.mockReset();
+      r.h.mint.mockResolvedValue(r.h.response);
+      await settle(3_100);
+      fireEvent.click(screen.getByTestId("retry-button"));
+      await settle(200);
+      // A fresh chat: no history.
+      expect(r.h.mint.mock.calls[0]?.[2]).toEqual([]);
+    });
+  });
+
+  describe("going offline during a chat", () => {
+    it("is announced once, by the chat, not also by the page behind it", async () => {
+      await start("voice");
+      vi.stubGlobal("navigator", {
+        ...navigator,
+        onLine: false,
+        userAgent: "",
+      });
+      act(() => void window.dispatchEvent(new Event("offline")));
+      const banners = screen.getAllByTestId("offline-banner");
+      expect(banners).toHaveLength(1);
+      expect(screen.getByTestId("conversation")).toContainElement(banners[0]!);
+    });
+  });
+
+  describe("an expired document", () => {
+    it("offers Load it again, and tapping it loads the same source again", async () => {
+      const onReloadSource = vi.fn();
+      await start(
+        "voice",
+        { mintError: new MintError("doc_not_found") },
+        onReloadSource,
+      );
+      expect(screen.getByTestId("failure-card")).toHaveAttribute(
+        "data-code",
+        "doc_not_found",
+      );
+      tap("Load it again");
+      expect(onReloadSource).toHaveBeenCalledOnce();
+    });
+
+    it("keeps the plain retry when the screen has no source to reload", async () => {
+      await start("voice", { mintError: new MintError("doc_not_found") });
+      expect(
+        screen.queryByRole("button", { name: "Load it again" }),
+      ).toBeNull();
+      expect(screen.getByTestId("retry-button")).toHaveTextContent("Try again");
     });
   });
 

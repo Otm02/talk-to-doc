@@ -22,10 +22,13 @@ function buzz() {
 export function VoiceChat({
   doc,
   onUseAnother,
+  onReloadSource,
   children,
 }: {
   doc: DocumentData;
   onUseAnother: () => void;
+  /** Loads the same source again, for a document that expired on the server. */
+  onReloadSource?: () => void;
   children: ReactNode;
 }) {
   const session = useVoiceSession(doc.meta.documentId);
@@ -72,6 +75,7 @@ export function VoiceChat({
           doc={doc}
           session={session}
           onStart={start}
+          onReloadSource={onReloadSource}
           onEnd={end}
           onClose={close}
         />

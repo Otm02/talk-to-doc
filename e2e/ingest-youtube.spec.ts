@@ -152,7 +152,9 @@ test.describe("YouTube ingestion (route mocked)", () => {
     await expect(page.getByLabel(/Choose a PDF/)).toBeAttached();
   });
 
-  test("a failure can be retried", async ({ page }) => {
+  test("a 502 is retried once by itself, so the user never sees it", async ({
+    page,
+  }) => {
     let n = 0;
     await page.route("**/api/ingest/youtube", (route) => {
       n += 1;
@@ -182,13 +184,52 @@ test.describe("YouTube ingestion (route mocked)", () => {
     await page.getByRole("radio", { name: "YouTube" }).click();
     await page.getByLabel("YouTube link").fill("jNQXAC9IVRw");
     await page.getByLabel("YouTube link").press("Enter");
+    await expect(
+      page.getByRole("heading", { name: "Me at the zoo" }),
+    ).toBeVisible({ timeout: 15_000 });
+    expect(n).toBe(2);
+  });
+
+  test("a failure that persists can be retried by hand", async ({ page }) => {
+    let broken = true;
+    await page.route("**/api/ingest/youtube", (route) =>
+      broken
+        ? route.fulfill({
+            status: 502,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: { code: "youtube_failed", message: "x" },
+            }),
+          })
+        : route.fulfill({
+            status: 200,
+            contentType: ND,
+            body: lines(
+              meta(),
+              { segment: { startSec: 0, text: "hi" } },
+              {
+                done: true,
+                stats: { segments: 1, words: 1, tokens: 1 },
+                coverage: 1,
+              },
+            ),
+          }),
+    );
+    await page.goto("/");
+    await page.getByRole("radio", { name: "YouTube" }).click();
+    await page.getByLabel("YouTube link").fill("jNQXAC9IVRw");
+    await page.getByLabel("YouTube link").press("Enter");
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible({
+      timeout: 15_000,
+    });
+    broken = false;
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(
       page.getByRole("heading", { name: "Me at the zoo" }),
     ).toBeVisible();
   });
 
-  test("a stream cut before `done` shows a retryable error", async ({
+  test("a stream cut before `done` keeps what arrived and offers Try again", async ({
     page,
   }) => {
     await mockIngest(
@@ -199,8 +240,16 @@ test.describe("YouTube ingestion (route mocked)", () => {
     await page.getByRole("radio", { name: "YouTube" }).click();
     await page.getByLabel("YouTube link").fill("jNQXAC9IVRw");
     await page.getByLabel("YouTube link").press("Enter");
+    const partial = page.getByTestId("partial-notice");
+    await expect(partial).toContainText("The connection dropped.", {
+      timeout: 15_000,
+    });
     await expect(
-      page.locator("[role=alert]:not(#__next-route-announcer__)"),
-    ).toContainText("We couldn't load this video's captions");
+      partial.getByRole("button", { name: "Try again" }),
+    ).toBeVisible();
+    // The first words are still there to read.
+    await expect(
+      page.getByRole("heading", { name: "Me at the zoo" }),
+    ).toBeVisible();
   });
 });
