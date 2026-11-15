@@ -19,7 +19,7 @@ vi.mock("@vercel/blob", () => blob);
 
 import { GET } from "./route";
 
-const SECRET = "cron-secret-0123456789";
+const SECRET = "cron-secret-for-tests";
 const TOKEN = "vercel_blob_rw_teststore_secretpart";
 const NOW = Date.UTC(2026, 10, 15, 3, 0, 0);
 

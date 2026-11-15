@@ -1,0 +1,6 @@
+# Fake values in tests that the generic-api-key rule matched in the first M10
+# commit. They are not credentials: the scanner test plants a made-up Blob
+# token prefix, the cron test uses a made-up bearer value. Fingerprints are
+# commit:file:rule:line. The values were made plainly fake in the next commit.
+c8e6bb206222711e981f9a473e52a07663dea6c3:scripts/check-bundle-secrets.test.ts:generic-api-key:45
+c8e6bb206222711e981f9a473e52a07663dea6c3:src/app/api/cron/cleanup/route.test.ts:generic-api-key:22

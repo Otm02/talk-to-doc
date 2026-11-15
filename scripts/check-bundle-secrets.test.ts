@@ -42,7 +42,7 @@ describe("scanText", () => {
     ["an OpenAI project key", FAKE_OPENAI_KEY, "openai-key"],
     ["a legacy key", "sk-" + "abcdefghijklmnopqrstuvwx", "openai-key"],
     ["a short test key", "x=" + "sk-" + "test1234", "openai-key"],
-    ["a Blob token", "vercel_blob_rw_abc123_secret", "blob-token"],
+    ["a Blob token", "vercel_blob_rw_" + "example", "blob-token"],
   ])("flags %s", (_name, text, kind) => {
     expect(scanText("a.js", `var k="${text}";`, noEnv)).toEqual([
       { file: "a.js", kind },
