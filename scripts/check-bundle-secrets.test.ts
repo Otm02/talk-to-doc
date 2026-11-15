@@ -64,6 +64,14 @@ describe("scanText", () => {
     const text = 'throw new Error("set `BLOB_READ_WRITE_TOKEN`")';
     const chunk = path.join("static", "chunks", "sdk.js");
     expect(scanText(chunk, text, noEnv)).toEqual([]);
+    // Vercel's build puts the same chunks under static/immutable/chunks.
+    const onVercel = path.join(
+      "static",
+      "immutable",
+      "chunks",
+      "3tyofnure3bvb.js",
+    );
+    expect(scanText(onVercel, text, noEnv)).toEqual([]);
     // Not in a prerendered page, an RSC payload or a source map.
     for (const file of ["server/app/index.html", "server/app/index.rsc"]) {
       expect(scanText(file, text, noEnv)).toHaveLength(1);

@@ -50,7 +50,9 @@ const KEY_PATTERNS: readonly { kind: string; pattern: RegExp }[] = [
  * value check below applies to every file.
  */
 const NAME_ALLOWED_IN_CHUNKS: readonly string[] = ["BLOB_READ_WRITE_TOKEN"];
-const CLIENT_CHUNK = /^static[\\/]chunks[\\/].*\.js$/;
+// Any .js under static/: Next writes chunks to static/chunks locally, and the
+// Vercel build moves them to static/immutable/chunks.
+const CLIENT_CHUNK = /^static[\\/].*\.js$/;
 
 /** Values shorter than this would match by accident (a bare "true" or "1"). */
 const MIN_VALUE_LENGTH = 8;
