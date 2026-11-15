@@ -14,7 +14,7 @@ cp .env.example .env.local   # optional; defaults work without it
 pnpm dev
 ```
 
-Open http://localhost:3000 (best at 390x844). `GET /api/health` shows the active model, upload mode and state backend.
+Open http://localhost:3000 (best at 390x844). `GET /api/health` shows the version, upload mode and state backend.
 
 ## Scripts
 
@@ -27,6 +27,7 @@ Open http://localhost:3000 (best at 390x844). `GET /api/health` shows the active
 | `pnpm format`                  | Prettier                                    |
 | `pnpm fixtures`                | Regenerate the test PDFs in `test/fixtures` |
 | `pnpm icons`                   | Redraw the app icons (uses Playwright)      |
+| `pnpm smoke <url>`             | Deploy smoke test (see below)               |
 
 Tests and CI never call the live OpenAI API, YouTube or Supadata. The YouTube tests serve responses recorded once by `scripts/record-youtube-fixtures.ts` (see `test/fixtures/README.md`).
 
@@ -66,6 +67,24 @@ The chain moves on only when the provider itself failed: blocked, timed out, or 
 **Cost.** Supadata's free plan gives 100 credits a month, 1 request per second, and needs no credit card. We ask for existing captions only (`mode=native`), which is 1 credit per video, never the AI-generated transcript at 2 credits per minute. Transcripts are cached for an hour by video and language in the same store as the documents (memory locally, Upstash on Vercel), so pasting the same video again, or testing, spends nothing. The title and channel come from YouTube's public oEmbed endpoint, which costs no credit. If the credits run out, the user sees "We've used up our YouTube lookups for now" and PDFs keep working.
 
 **Run fully local, with no third party.** Leave `SUPADATA_API_KEY` empty (or unset). The chain is then Direct only and nothing leaves your machine except requests to YouTube. If YouTube blocks your own IP, you will see "YouTube is blocking our server right now" and no fallback. To check which provider served a video, read `provider` in the first NDJSON line; the server log prints it too (ids and counts only, never transcript text).
+
+## Deploying and smoke test
+
+Environment variables per environment, the production switch and the dashboard steps are in `docs/DEPLOY.md`.
+
+```bash
+pnpm smoke https://your-app.vercel.app --no-session
+pnpm smoke https://your-app.vercel.app            # also mints one client secret
+```
+
+It runs four checks and exits non-zero if any fails:
+
+1. `/api/health` reports `uploadMode: "blob"` and `state: "upstash"` (on localhost: `direct`, and `memory` or `upstash`).
+2. The sample PDF (`test/fixtures/pdf/multi-page.pdf`, or `--pdf <file>`) goes through the configured upload mode and streams back as NDJSON. In blob mode it then checks the blob was deleted.
+3. One YouTube URL ingests (`--youtube <url>` to change it).
+4. One Realtime client secret is requested for the ingested document. WebRTC is never opened and the secret is never printed. **This is a live OpenAI call**; `--no-session` skips it.
+
+For a preview behind Vercel Authentication, set `SMOKE_BYPASS_SECRET` in the environment (not on the command line).
 
 ## Docs
 

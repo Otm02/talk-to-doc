@@ -15,6 +15,7 @@ import {
   type StateAdapters,
 } from "./types";
 
+/** Production keeps the original prefix; other environments get their own (see env.ts). */
 const PREFIX = "ttd";
 // The limiter answers within this or the request is refused.
 const TIMEOUT_MS = 2000;
@@ -34,8 +35,11 @@ export function createUpstashRedis(url: string, token: string): Redis {
   });
 }
 
-export function createUpstashDocumentStore(redis: Redis): DocumentStore {
-  const key = (id: string) => `${PREFIX}:doc:${id}`;
+export function createUpstashDocumentStore(
+  redis: Redis,
+  prefix: string = PREFIX,
+): DocumentStore {
+  const key = (id: string) => `${prefix}:doc:${id}`;
   return {
     async put(id, doc, ttlMs) {
       await redis.set(key(id), JSON.stringify(doc), {
@@ -82,13 +86,14 @@ export function createUpstashRateLimiter(
   redis: Redis,
   clock: Clock = systemClock,
   timeoutMs: number = TIMEOUT_MS,
+  prefix: string = PREFIX,
 ): RateLimiter {
   // @upstash/ratelimit fixes the rule at construction, so keep one per rule.
   const limiters = new Map<string, Ratelimit>();
   return {
     countDaily: (key, cap): Promise<DailyCountResult> =>
       closed(timeoutMs, async () => {
-        const k = `${PREFIX}:daily:${key}:${dayKey(clock.now())}`;
+        const k = `${prefix}:daily:${key}:${dayKey(clock.now())}`;
         // INCR is atomic, so concurrent starts cannot both take the last slot.
         // The TTL outlives the day so a late hit never recreates an immortal key.
         const [count] = await redis
@@ -105,7 +110,7 @@ export function createUpstashRateLimiter(
     peekDaily: (key) =>
       closed(timeoutMs, async () => {
         const raw = await redis.get<string | number>(
-          `${PREFIX}:daily:${key}:${dayKey(clock.now())}`,
+          `${prefix}:daily:${key}:${dayKey(clock.now())}`,
         );
         // automaticDeserialization is off, so a counter comes back as a string.
         const count = raw === null ? 0 : Number(raw);
@@ -124,7 +129,7 @@ export function createUpstashRateLimiter(
       rl = new Ratelimit({
         redis,
         limiter: Ratelimit.slidingWindow(rule.max, `${rule.windowMs} ms`),
-        prefix: `${PREFIX}:rl:${id}`,
+        prefix: `${prefix}:rl:${id}`,
         analytics: false,
         timeout: timeoutMs,
       });
@@ -145,9 +150,10 @@ export function createUpstashRateLimiter(
 export function createUpstashAdapters(
   redis: Redis,
   clock: Clock = systemClock,
+  prefix: string = PREFIX,
 ): StateAdapters {
   return {
-    documents: createUpstashDocumentStore(redis),
-    rateLimiter: createUpstashRateLimiter(redis, clock),
+    documents: createUpstashDocumentStore(redis, prefix),
+    rateLimiter: createUpstashRateLimiter(redis, clock, TIMEOUT_MS, prefix),
   };
 }

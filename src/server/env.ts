@@ -91,6 +91,11 @@ export interface Env {
   upstash: { url: string; token: string } | undefined;
   stateDriver: StateDriver;
   onVercel: boolean;
+  /**
+   * Key prefix in the shared store. The free Upstash plan has one database, so
+   * previews and local runs must not share production's daily cap and limits.
+   */
+  stateNamespace: string;
   commitSha: string | undefined;
 }
 
@@ -172,6 +177,10 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     upstash,
     stateDriver: upstash ? "upstash" : "memory",
     onVercel,
+    stateNamespace:
+      v.VERCEL_ENV === "production"
+        ? "ttd"
+        : `ttd-${(v.VERCEL_ENV ?? "local").replace(/[^a-z0-9]/gi, "")}`,
     commitSha: v.VERCEL_GIT_COMMIT_SHA,
   };
 }

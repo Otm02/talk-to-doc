@@ -33,5 +33,7 @@ test("health reports only what the browser needs", async ({ request }) => {
     ok: true,
     version: expect.any(String),
     uploadMode: "direct",
+    // memory or upstash, depending on whether the dev env has Upstash.
+    state: expect.stringMatching(/^(memory|upstash)$/),
   });
 });
