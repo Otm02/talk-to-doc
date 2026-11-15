@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { pdfFixture } from "@test/fixtures";
-import { buildBlankPages } from "../../../../scripts/make-fixtures";
+import {
+  UNICODE_LINES,
+  buildBlankPages,
+} from "../../../../scripts/make-fixtures";
 import { AppError } from "../../errors";
 import {
   extractionSlots,
@@ -278,5 +281,49 @@ describe("joinTextItems", () => {
 
   it("returns an empty string for no items", () => {
     expect(joinTextItems([])).toBe("");
+  });
+});
+
+describe("non-Latin text (SPEC 5.1)", () => {
+  // The fixtures are made by scripts/make-fixtures.ts from UNICODE_LINES, so
+  // the expected text lives in one place. What must hold is that the letters
+  // come out as the same Unicode letters: nothing folded to ASCII, nothing
+  // dropped, no replacement characters.
+  const SCRIPTS = {
+    cyrillic: /\p{Script=Cyrillic}/u,
+    cjk: /\p{Script=Han}/u,
+    arabic: /\p{Script=Arabic}/u,
+    devanagari: /\p{Script=Devanagari}/u,
+  } as const;
+
+  for (const [name, letters] of Object.entries(SCRIPTS)) {
+    it(`keeps ${name} as it was written`, async () => {
+      const doc = await openTracked(pdfFixture(`${name}.pdf`));
+      expect(doc.numPages).toBe(1);
+      const [text = ""] = await readAll(doc);
+      expect(text).toMatch(letters);
+      expect(text).not.toContain("\uFFFD");
+      // Every word of the source is there. (pdf.js may hand a right-to-left
+      // line back with its words in visual order; the words themselves are
+      // what the model needs and what must not change.)
+      const words = (UNICODE_LINES[name] ?? [])
+        .flatMap((l) => l.split(/[\s，。]+/))
+        .filter((w) => w !== "");
+      expect(words.length).toBeGreaterThan(3);
+      for (const w of words) expect(text, w).toContain(w);
+    });
+  }
+
+  it("does not turn any of them into Latin letters", async () => {
+    // One at a time: at most two extractions may hold a slot at once.
+    for (const name of Object.keys(SCRIPTS)) {
+      const doc = await open(pdfFixture(`${name}.pdf`));
+      try {
+        const [text = ""] = await readAll(doc);
+        expect(text, name).not.toMatch(/[A-Za-z]/);
+      } finally {
+        await doc.close();
+      }
+    }
   });
 });

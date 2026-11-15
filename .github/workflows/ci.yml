@@ -46,21 +46,66 @@ jobs:
       # is shown in the log and the job summary.
       - run: pnpm audit --audit-level=high
         continue-on-error: true
+      # lint, then `next typegen && tsc` (typegen first: the route types tsc
+      # reads are generated), then the unit tests with the coverage gates in
+      # vitest.config.mts: 80% overall, 90% for src/server and the realtime core.
       - run: pnpm check
+      # Written even when the gate failed, so the table shows which area fell short.
+      - name: Coverage in the job summary
+        if: always()
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/coverage-summary.ts >> "$GITHUB_STEP_SUMMARY"
       - run: pnpm build
       # T-01: fails if a key pattern, a secret variable's name or its value is in
       # anything the browser can download. Reads no secrets (CI has none).
       - run: pnpm check:bundle
+
+  # The e2e suite at 390x844 on the mock transport: no OpenAI, YouTube or
+  # Supadata. Each browser is its own job so one failing never hides the other.
+  # The @live test is excluded by playwright.config.ts and never runs here.
+  # If WebKit's system packages ever stop installing on the runner, delete the
+  # `webkit` entry and say so in the README (it still runs locally).
+  e2e:
+    name: e2e (${{ matrix.browser }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(pnpm exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      # The browser download is the slow part. The key holds the Playwright
+      # version, because a new version wants a new browser build.
+      - name: Cache browsers
+        id: browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-${{ matrix.browser }}
       # The runner's apt indexes can point at a stale or unreachable mirror
       # (a run failed resolving azure.archive.ubuntu.com), so refresh first.
       - run: sudo apt-get update
-      - run: pnpm exec playwright install --with-deps chromium
-      # Only chromium is installed; the webkit project would fail to launch.
-      - run: pnpm exec playwright test --project=chromium
+      # System packages are not in the cache, so a hit still installs them.
+      - name: Install browser (cache miss)
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+      - name: Install system packages (cache hit)
+        if: steps.browsers.outputs.cache-hit == 'true'
+        run: pnpm exec playwright install-deps ${{ matrix.browser }}
+      - run: pnpm exec playwright test --project=${{ matrix.browser }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.browser }}
           path: |
             playwright-report
             test-results
