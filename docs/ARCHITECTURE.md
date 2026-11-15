@@ -105,14 +105,12 @@ Every handler follows the same shape: `parse(zodSchema)`, then one service call,
 
 | Route | Input (zod) | Output | Guards |
 |---|---|---|---|
-| `GET /api/health` | — | `{ ok, sha, driver }` | — |
-| `GET /api/limits` | — | `{ voice: "ok" \| budget code }` | read-only; kill switch and daily cap only |
-| `POST /api/upload/token` | `generate-client-token` event only | Blob token JSON | token limit per IP (10/min) |
+| `GET /api/health` | — | `{ ok, version, uploadMode }` | health limit per IP (120/min) |
+| `POST /api/upload/token` | `generate-client-token` event only | Blob token JSON | token limit per IP (20/hour) and a global 150 a day (`rate_limited` until UTC midnight) |
 | `POST /api/ingest/pdf` | `{ blobUrl, fileName? }` (blob) or multipart `file` (direct) | NDJSON | ingest limit per IP (10/min) |
-| `POST /api/ingest/youtube` | `{ url, lang? }` | NDJSON | ingest limit; Supadata guard |
-| `GET /api/documents/[id]` | `id` (base64url, 22 chars) | `{ meta, pages[] }` (streamed when large) | read limit |
+| `POST /api/ingest/youtube` | `{ url, lang? }` | NDJSON | ingest limit; Supadata guard (3 lookups per UTC day, `youtube_quota`) |
 | `POST /api/realtime/session` | `{ documentId, history?: [{ role: "user" \| "assistant", text }] }` | `{ clientSecret, expiresAt, model }` (`expiresAt` is unix seconds, as OpenAI sends it) | `VOICE_ENABLED`, per-IP limit (15 per 10 min; a 429 carries `Retry-After` and `error.retryAfterSec`), `DAILY_SESSION_CAP` (counted only after a successful mint); OpenAI quota or billing error → 503 `budget_exhausted` |
-| `GET /api/cron/cleanup` | header `Authorization: Bearer CRON_SECRET` | `{ deleted }` | Vercel cron only |
+| `GET /api/cron/cleanup` | header `Authorization: Bearer CRON_SECRET` | `{ deleted }` | Vercel cron only (daily, `vercel.json`); cron limit per IP (5/min) before the secret is checked; deletes `uploads/*.pdf` older than 1 h |
 
 ### NDJSON ingest protocol
 
@@ -401,11 +399,13 @@ Validated lazily in `src/server/env.ts` (first request, not build). Secrets are 
 | `VOICE_ENABLED` | | true | kill switch |
 | `DAILY_SESSION_CAP` | | 40 | session starts per UTC day, counted in RateLimiter |
 | `BLOB_READ_WRITE_TOKEN` | S | none | set by the Blob integration |
+| `IP_HASH_SALT` | S | random per run locally | at least 16 characters; required on Vercel; keys the client-address hash for limits |
+| `CRON_SECRET` | S | none | bearer token for the cleanup cron; unset means it refuses everyone |
 | `UPSTASH_REDIS_REST_URL` / `KV_REST_API_URL` | S | none | both names accepted |
 | `UPSTASH_REDIS_REST_TOKEN` / `KV_REST_API_TOKEN` | S | none | set together with the URL |
 | `NEXT_PUBLIC_REALTIME_TRANSPORT` | | `webrtc` | `mock` in e2e |
 
-The state driver is inferred: Upstash variables present means `upstash`, otherwise `memory`. On Vercel (`VERCEL` or `VERCEL_ENV` set) the Upstash variables are required and `UPLOAD_MODE=direct` is refused, so a misconfigured preview fails loudly. `IP_HASH_SALT`, `CRON_SECRET` and `YOUTUBE_PROVIDERS` from the earlier draft move to the milestones that use them.
+The state driver is inferred: Upstash variables present means `upstash`, otherwise `memory`. On Vercel (`VERCEL` or `VERCEL_ENV` set) the Upstash variables and `IP_HASH_SALT` are required and `UPLOAD_MODE=direct` is refused, so a misconfigured preview fails loudly. `IP_HASH_SALT`, `CRON_SECRET` and `YOUTUBE_PROVIDERS` from the earlier draft move to the milestones that use them.
 
 Next 16 note: with `cacheComponents`, `export const runtime` is a build error. Route handlers run on Node by default, so they export nothing.
 
@@ -425,7 +425,7 @@ Next 16 note: with `cacheComponents`, `export const runtime` is a build error. R
 | Voice `marin` | other voices | Recommended by OpenAI for quality; locked after the first audio |
 | `gpt-4o-mini-transcribe` for user captions | `gpt-transcribe`; none | Cheapest model that works with VAD over WebRTC; `gpt-transcribe` is WebSocket-only for committed turns. Sunset 2027-02-26 is noted in the README |
 | Two adapters (DocumentStore, RateLimiter), memory or Upstash by env | Module memory; SQLite; Postgres | Functions do not share memory across instances. Upstash's free plan needs no card and is HTTP-based (no connection pool). Memory keeps tests fast and offline |
-| OpenAI's hard limit on the key replaces a dollar ledger | Server-side UsageLedger with pre-charged reservations and client-reported usage; sideband | OpenAI billing already enforces the $20 cap, so a second ledger can only drift from it, costs Redis commands, and depends on usage the server cannot see (`response.done` stays in the browser). Cheap guards stay (model, context budget, kill switch, session length, per-IP limit, daily session cap). A billing error maps to 503 `budget_exhausted`. The dev-only client overlay is advisory and reports nothing. We accept having no server-side spend view |
+| OpenAI's hard limit on the key replaces a dollar ledger | A server-side dollar ledger with pre-charged reservations and client-reported usage; a sideband socket | OpenAI billing already enforces the $20 cap, so a second ledger can only drift from it, costs Redis commands, and depends on usage the server cannot see (`response.done` stays in the browser). Cheap guards stay (model, context budget, kill switch, session length, per-IP limit, daily session cap). A billing error maps to 503 `budget_exhausted`. The dev-only client overlay is advisory and reports nothing. We accept having no server-side spend view |
 | YouTube provider chain: direct, then Supadata | Supadata only; a residential proxy; the YouTube Data API | Direct is free and works locally; YouTube blocks cloud IPs, so Supadata (free plan, no card) covers Vercel. Proxies cost money. The Data API only serves captions for videos you own |
 | Hand-written caption XML parser | fast-xml-parser; xml2js | The format is flat `<text start dur>` elements. A small parser that rejects DTDs avoids XXE and entity-expansion risk without a dependency |
 | No `middleware.ts` / `proxy.ts` | Middleware for headers and rate limits | Next buffers proxied request bodies at 10 MB, which would truncate local 25 MB direct uploads. Headers go in `next.config.ts`, limits in handlers |

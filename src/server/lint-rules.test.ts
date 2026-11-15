@@ -24,6 +24,14 @@ describe("import boundaries", () => {
     expect(rules).toContain("no-restricted-imports");
   });
 
+  it("blocks dangerouslySetInnerHTML anywhere in src", async () => {
+    const rules = await lint(
+      "export const X = ({ t }: { t: string }) => <div dangerouslySetInnerHTML={{ __html: t }} />;\n",
+      "src/features/document/x.tsx",
+    );
+    expect(rules).toContain("react/no-danger");
+  });
+
   it("blocks process.env outside env.ts", async () => {
     const rules = await lint(
       "export const k = process.env.X;\n",

@@ -5,4 +5,4 @@ import { ingestPdf } from "@/server/ingest/pdf/request";
 // No `runtime` or `dynamic` export: both are rejected under cacheComponents.
 export const maxDuration = 60;
 
-export const POST = handle(ingestPdf);
+export const POST = handle("ingest-pdf", ingestPdf);

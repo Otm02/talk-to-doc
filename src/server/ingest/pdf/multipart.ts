@@ -1,7 +1,7 @@
 import "server-only";
 import { catalogError } from "../../errors";
 import { MAX_PDF_BYTES, MULTIPART_OVERHEAD_BYTES } from "./limits";
-import { BodyTooLargeError, readStreamCapped } from "./read-capped";
+import { BodyTooLargeError, readStreamCapped } from "../../read-capped";
 
 export interface UploadedPdf {
   bytes: Uint8Array;

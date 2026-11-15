@@ -84,9 +84,14 @@ export function createChain(
  */
 export function buildProviders(
   env: Pick<Env, "supadataApiKey" | "onVercel">,
+  /** Runs before each Supadata lookup; see createSupadataGuard. */
+  supadataGuard?: () => Promise<void>,
 ): TranscriptProvider[] {
   const supadata = env.supadataApiKey
-    ? createSupadataProvider({ apiKey: env.supadataApiKey })
+    ? createSupadataProvider({
+        apiKey: env.supadataApiKey,
+        beforeRequest: supadataGuard,
+      })
     : undefined;
   const direct = createDirectProvider({
     timeoutMs:

@@ -62,6 +62,12 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // T-11: document text, titles and transcripts are untrusted. They are only
+  // ever rendered as React text nodes, so raw HTML injection is banned.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: { "react/no-danger": "error" },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

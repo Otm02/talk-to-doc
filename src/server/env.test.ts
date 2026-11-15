@@ -6,6 +6,8 @@ const upstash = {
   UPSTASH_REDIS_REST_TOKEN: "super-secret-token",
 };
 
+const salt = { IP_HASH_SALT: "test-salt-0123456789abcdef" };
+
 describe("parseEnv", () => {
   it("applies defaults with no variables at all", () => {
     const env = parseEnv({});
@@ -62,17 +64,50 @@ describe("parseEnv", () => {
   });
 
   it("defaults to blob on Vercel and requires upstash there", () => {
-    expect(parseEnv({ VERCEL_ENV: "preview", ...upstash }).uploadMode).toBe(
-      "blob",
+    expect(
+      parseEnv({ VERCEL_ENV: "preview", ...upstash, ...salt }).uploadMode,
+    ).toBe("blob");
+    expect(() => parseEnv({ VERCEL_ENV: "preview", ...salt })).toThrow(
+      /UPSTASH_REDIS_REST_URL.*required on Vercel/,
     );
-    expect(() => parseEnv({ VERCEL_ENV: "preview" })).toThrow(
-      /required on Vercel/,
+  });
+
+  it("requires IP_HASH_SALT on Vercel, so every instance keys a client the same way", () => {
+    expect(() => parseEnv({ VERCEL_ENV: "production", ...upstash })).toThrow(
+      /IP_HASH_SALT is required on Vercel/,
     );
+    expect(
+      parseEnv({ VERCEL_ENV: "production", ...upstash, ...salt }).ipHashSalt,
+    ).toBe(salt.IP_HASH_SALT);
+  });
+
+  it("makes up a salt locally when none is set", () => {
+    const env = parseEnv({});
+    expect(env.ipHashSalt).toMatch(/^[0-9a-f]{64}$/);
+    expect(parseEnv({}).ipHashSalt).not.toBe(env.ipHashSalt);
+  });
+
+  it("refuses a short IP_HASH_SALT", () => {
+    expect(() => parseEnv({ IP_HASH_SALT: "short" })).toThrow(
+      /IP_HASH_SALT must be at least 16/,
+    );
+  });
+
+  it("reads CRON_SECRET, and treats it as unset when empty", () => {
+    expect(parseEnv({ CRON_SECRET: "cron-secret-value" }).cronSecret).toBe(
+      "cron-secret-value",
+    );
+    expect(parseEnv({ CRON_SECRET: "" }).cronSecret).toBeUndefined();
   });
 
   it("refuses UPLOAD_MODE=direct on Vercel", () => {
     expect(() =>
-      parseEnv({ VERCEL_ENV: "production", UPLOAD_MODE: "direct", ...upstash }),
+      parseEnv({
+        VERCEL_ENV: "production",
+        UPLOAD_MODE: "direct",
+        ...upstash,
+        ...salt,
+      }),
     ).toThrow(/not allowed on Vercel/);
   });
 

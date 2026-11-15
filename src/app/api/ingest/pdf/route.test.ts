@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pdfFixture } from "@test/fixtures";
-import { buildBlankPages } from "../../../../../scripts/make-fixtures";
+import {
+  buildBlankPages,
+  buildTextPages,
+} from "../../../../../scripts/make-fixtures";
 import { IngestLineSchema, type IngestLine } from "@/lib/wire/ingest";
 import { readNdjson } from "@/lib/wire/ndjson";
+import { countTokens } from "@/server/context/budget";
 import { resetEnvCacheForTests } from "@/server/env";
 import type { PdfDocumentRecord } from "@/server/ingest/record";
 import { createMemoryAdapters } from "@/server/state/memory";
@@ -129,6 +133,53 @@ describe("POST /api/ingest/pdf, direct mode: happy path", () => {
     expect(record?.context).toContain("--- Page 1 ---\nQuarterly Report");
     expect(record?.context).toContain("--- Page 4 ---\nAppendix");
     expect(record?.stats.tokens).toBeGreaterThan(50);
+  });
+
+  it("stores only what fits CONTEXT_TOKEN_BUDGET, and still streams every page", async () => {
+    vi.stubEnv("CONTEXT_TOKEN_BUDGET", "1000");
+    resetEnvCacheForTests();
+    const sentence = "Revenue grew twelve percent on strong regional demand.";
+    const res = await POST(upload(buildTextPages(60, [sentence, sentence])));
+    const lines = await readLines(res);
+
+    // The user still gets the whole text in the preview.
+    expect(lines.filter((l) => "page" in l)).toHaveLength(60);
+    const done = lines.at(-1);
+    if (!done || !("done" in done)) throw new Error("no done line");
+    expect(done.stats.tokens).toBeGreaterThan(1000);
+    expect(done.coverage).toBeLessThan(1);
+
+    // The server keeps the capped context, never the rest.
+    const meta = lines[0];
+    if (!meta || !("documentId" in meta)) throw new Error("no meta line");
+    const record = (await holder.state?.documents.get(
+      meta.documentId,
+    )) as PdfDocumentRecord;
+    expect(countTokens(record.context)).toBeLessThanOrEqual(1000);
+    expect(record.context).toContain("--- Page 1 ---");
+    expect(record.context).not.toContain("--- Page 60 ---");
+    expect(JSON.stringify(record)).not.toContain("--- Page 60 ---");
+  });
+
+  it("logs a scan found at the end of the stream with its code, not as a clean 200", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const res = await POST(upload(pdfFixture("image-only.pdf")));
+    await readLines(res);
+
+    const logged = info.mock.calls.map((c) => JSON.parse(String(c[0])));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      route: "ingest-pdf",
+      status: 200,
+      code: "pdf_no_text",
+    });
+    expect(Object.keys(logged[0]).sort()).toEqual([
+      "code",
+      "durationMs",
+      "requestId",
+      "route",
+      "status",
+    ]);
   });
 
   it("uses the file name when the PDF has no title", async () => {

@@ -49,7 +49,6 @@ function setup(doc: OpenPdf, overrides: { budget?: number } = {}) {
     store,
     contextTokenBudget: overrides.budget ?? 8000,
     ttlMs: 60_000,
-    requestId: "req-1",
     now: () => 1_700_000_000_000,
   });
   return { store, stream };
@@ -204,7 +203,6 @@ describe("createPdfIngestStream", () => {
       store,
       contextTokenBudget: 8000,
       ttlMs: 7_200_000,
-      requestId: "r",
     });
     await lines(stream);
     expect(put).toHaveBeenCalledWith("d", expect.any(Object), 7_200_000);
@@ -280,6 +278,9 @@ describe("createPdfIngestStream", () => {
       const log = vi
         .spyOn(console, "error")
         .mockImplementation(() => undefined);
+      const info = vi
+        .spyOn(console, "info")
+        .mockImplementation(() => undefined);
       const doc = fakeDoc([prose("a")], {
         failOn: 1,
         error: new Error("secret upstream detail /srv/app/key"),
@@ -293,9 +294,11 @@ describe("createPdfIngestStream", () => {
         },
       });
       expect(JSON.stringify(out)).not.toContain("secret upstream");
-      // The detail still reaches the server log, with the request id.
-      expect(log).toHaveBeenCalledWith("[req-1] internal", expect.any(Error));
+      // pdf.js messages can quote the document, so the detail is not logged.
+      expect(log).not.toHaveBeenCalled();
+      expect(info).not.toHaveBeenCalled();
       log.mockRestore();
+      info.mockRestore();
     });
 
     it("reports a failed save as an error line, not a done line", async () => {
@@ -312,12 +315,31 @@ describe("createPdfIngestStream", () => {
         store,
         contextTokenBudget: 8000,
         ttlMs: 1000,
-        requestId: "r",
       });
       const out = await lines(stream);
       expect(out.some((l) => "done" in l)).toBe(false);
       expect(out.at(-1)).toMatchObject({ error: { code: "internal" } });
       log.mockRestore();
+    });
+
+    it("tells onError the code, for the request log, and only the code", async () => {
+      const seen: string[] = [];
+      const doc = fakeDoc([prose("a")], {
+        failOn: 1,
+        error: new Error("secret upstream detail"),
+      });
+      const store = createMemoryDocumentStore();
+      const stream = createPdfIngestStream({
+        doc,
+        documentId: "d",
+        title: "t",
+        store,
+        contextTokenBudget: 8000,
+        ttlMs: 1000,
+        onError: (code) => seen.push(code),
+      });
+      await lines(stream);
+      expect(seen).toEqual(["internal"]);
     });
 
     it("passes AppError codes through", async () => {

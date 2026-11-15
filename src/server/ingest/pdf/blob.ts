@@ -2,7 +2,7 @@ import "server-only";
 import { BlobNotFoundError, del, get } from "@vercel/blob";
 import { AppError, catalogError } from "../../errors";
 import { BLOB_DELETE_TIMEOUT_MS, MAX_PDF_BYTES } from "./limits";
-import { BodyTooLargeError, readStreamCapped } from "./read-capped";
+import { BodyTooLargeError, readStreamCapped } from "../../read-capped";
 
 export interface OwnBlob {
   /** Normalized URL, safe to hand to the SDK. */
@@ -96,9 +96,10 @@ export async function readBlob(
 }
 
 /**
- * Best effort: a failed delete is logged, not shown to the user, who has
- * already been served (or refused) by the time this matters. The SDK does not
- * throw when the blob is already gone.
+ * Best effort: a failed delete is not shown to the user, who has already been
+ * served (or refused) by the time this matters, and it is not logged either:
+ * the request log carries no free-form text. The SDK does not throw when the
+ * blob is already gone.
  */
 export async function deleteBlob(blob: OwnBlob, token: string): Promise<void> {
   try {
@@ -106,7 +107,7 @@ export async function deleteBlob(blob: OwnBlob, token: string): Promise<void> {
       token,
       abortSignal: AbortSignal.timeout(BLOB_DELETE_TIMEOUT_MS),
     });
-  } catch (err) {
-    console.error("[blob] delete failed", new URL(blob.url).pathname, err);
+  } catch {
+    // See above.
   }
 }

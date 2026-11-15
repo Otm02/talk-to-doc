@@ -2,6 +2,7 @@ import "server-only";
 import {
   YoutubeIngestBodySchema,
   type IngestLine,
+  type TranscriptProviderName,
   type YoutubeStats,
 } from "@/lib/wire/ingest";
 import { encodeNdjsonLine } from "@/lib/wire/ndjson";
@@ -9,7 +10,7 @@ import { parseYoutubeUrl, thumbnailUrl } from "@/lib/youtube/parseUrl";
 import { capToTokenBudget, countTokens } from "../../context/budget";
 import { getEnv } from "../../env";
 import { catalogError } from "../../errors";
-import { parseWith } from "../../http";
+import { MAX_YOUTUBE_BODY_BYTES, parseJsonBody } from "../../body";
 import { enforceRateLimit } from "../../security/rate-limit";
 import { getState } from "../../state";
 import { cleanTitle } from "../pdf/title";
@@ -21,12 +22,8 @@ import {
   type CachedTranscript,
 } from "./cache";
 import { renderForModel, toParagraphs } from "./format";
-import {
-  buildProviders,
-  createChain,
-  type Attempt,
-  type TranscriptChain,
-} from "./index";
+import { createSupadataGuard } from "./guard";
+import { buildProviders, createChain, type TranscriptChain } from "./index";
 import {
   DEFAULT_LANG,
   MAX_DURATION_SEC,
@@ -39,6 +36,8 @@ export interface YoutubeIngestDeps {
   /** Tests pass a fake chain; production builds one from the env. */
   chain?: TranscriptChain;
   now?: () => number;
+  /** Reports which provider served the transcript, for the request log. */
+  onProvider?: (provider: TranscriptProviderName) => void;
 }
 
 const encoder = new TextEncoder();
@@ -52,20 +51,17 @@ const encoder = new TextEncoder();
  */
 export async function ingestYoutube(
   req: Request,
-  requestId: string,
   deps: YoutubeIngestDeps = {},
 ): Promise<Response> {
   const now = deps.now ?? Date.now;
-  const startedAt = now();
   const env = getEnv();
 
   await enforceRateLimit(req, "ingest-youtube", YOUTUBE_INGEST_RATE);
 
-  const body = parseWith(
+  const body = await parseJsonBody(
+    req,
     YoutubeIngestBodySchema,
-    await req.json().catch(() => {
-      throw catalogError("invalid_request");
-    }),
+    MAX_YOUTUBE_BODY_BYTES,
   );
   const parsed = parseYoutubeUrl(body.url);
   if (!parsed.ok) {
@@ -80,15 +76,17 @@ export async function ingestYoutube(
   const store = getState().documents;
 
   let cached = true;
-  let attempts: Attempt[] = [];
   let served = await readCachedTranscript(store, videoId, lang);
   if (!served) {
     cached = false;
-    const chain = deps.chain ?? createChain(buildProviders(env));
+    const chain =
+      deps.chain ??
+      createChain(
+        buildProviders(env, createSupadataGuard(getState().rateLimiter)),
+      );
     try {
       const result = await chain.fetch(videoId, lang, req.signal);
       served = { transcript: result.transcript, provider: result.provider };
-      attempts = result.attempts;
     } catch (err) {
       if (err instanceof TranscriptError) throw toAppError(err);
       throw err;
@@ -97,6 +95,7 @@ export async function ingestYoutube(
   }
 
   const { transcript, provider } = served;
+  deps.onProvider?.(provider);
   assertNotTooLong(served);
 
   const paragraphs = toParagraphs(transcript.segments);
@@ -129,22 +128,6 @@ export async function ingestYoutube(
     createdAt: now(),
   };
   await store.put(documentId, record, env.docTtlMinutes * 60_000);
-
-  // Ids, counts and timings only. Never transcript text, never the raw URL.
-  console.info(
-    JSON.stringify({
-      event: "youtube_ingest",
-      requestId,
-      videoId,
-      provider,
-      cached,
-      attempts,
-      segments: paragraphs.length,
-      tokens,
-      coverage: Number(coverage.toFixed(3)),
-      ms: now() - startedAt,
-    }),
-  );
 
   const lines: IngestLine[] = [
     {

@@ -12,8 +12,24 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# No secrets are passed to any step. CI never receives the OpenAI key.
+# No repository secrets are passed to any step. CI never receives the OpenAI
+# key. (The gitleaks job uses the token GitHub gives every run, read-only.)
 jobs:
+  # T-14: nothing that looks like a credential may be in the history.
+  gitleaks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -25,8 +41,16 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # T-15: reports known vulnerabilities in dependencies. Warn only: a
+      # finding in a transitive package is not ours to fix in this run, but it
+      # is shown in the log and the job summary.
+      - run: pnpm audit --audit-level=high
+        continue-on-error: true
       - run: pnpm check
       - run: pnpm build
+      # T-01: fails if a key pattern, a secret variable's name or its value is in
+      # anything the browser can download. Reads no secrets (CI has none).
+      - run: pnpm check:bundle
       # The runner's apt indexes can point at a stale or unreachable mirror
       # (a run failed resolving azure.archive.ubuntu.com), so refresh first.
       - run: sudo apt-get update

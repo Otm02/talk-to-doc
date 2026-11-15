@@ -152,19 +152,68 @@ describe("POST /api/upload/token", () => {
     expect(body.error.message).toContain("BLOB_READ_WRITE_TOKEN");
   });
 
-  it("limits tokens per client, with Retry-After", async () => {
-    for (let i = 0; i < 10; i++) {
+  it("limits tokens per client to 20 an hour, with Retry-After", async () => {
+    for (let i = 0; i < 20; i++) {
       expect((await POST(tokenRequest("uploads/a.pdf"))).status).toBe(200);
     }
     const limited = await POST(tokenRequest("uploads/a.pdf"));
     expect(limited.status).toBe(429);
     expect((await limited.json()).error.code).toBe("rate_limited");
-    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    const wait = Number(limited.headers.get("retry-after"));
+    expect(wait).toBeGreaterThan(60);
+    expect(wait).toBeLessThanOrEqual(3600);
 
     const other = await POST(
       tokenRequest("uploads/a.pdf", {}, { "x-forwarded-for": "198.51.100.9" }),
     );
     expect(other.status).toBe(200);
+  });
+
+  describe("the daily ceiling for everyone together", () => {
+    const from = (n: number) => ({ "x-forwarded-for": `198.51.100.${n}` });
+
+    it("stops at 150 tokens a day, even from clients that are each under their own limit", async () => {
+      for (let i = 0; i < 150; i++) {
+        // 8 clients, so none is near 20 an hour.
+        const res = await POST(
+          tokenRequest("uploads/a.pdf", {}, from((i % 8) + 1)),
+        );
+        expect(res.status, `token ${i + 1}`).toBe(200);
+      }
+      const res = await POST(tokenRequest("uploads/a.pdf", {}, from(9)));
+
+      expect(res.status).toBe(429);
+      const body = await res.json();
+      expect(body.error.code).toBe("rate_limited");
+      // Until UTC midnight, in the header and the body.
+      expect(body.error.retryAfterSec).toBeGreaterThan(0);
+      expect(body.error.retryAfterSec).toBeLessThanOrEqual(86_400);
+      expect(res.headers.get("retry-after")).toBe(
+        String(body.error.retryAfterSec),
+      );
+    });
+
+    it("is not used up by malformed requests", async () => {
+      for (let i = 0; i < 160; i++) {
+        const res = await POST(
+          new Request("http://localhost/api/upload/token", {
+            method: "POST",
+            headers: from((i % 40) + 1),
+            body: "{}",
+          }),
+        );
+        expect(res.status).toBe(400);
+      }
+      const ok = await POST(tokenRequest("uploads/a.pdf", {}, from(200)));
+      expect(ok.status).toBe(200);
+    });
+
+    it("counts a refused pathname, which still asked for a token", async () => {
+      await POST(tokenRequest("not-uploads/a.pdf", {}, from(10)));
+      expect(await holder.state?.rateLimiter.peekDaily("upload-tokens")).toBe(
+        1,
+      );
+    });
   });
 
   it("turns an unexpected SDK failure into upload_rejected without leaking it", async () => {

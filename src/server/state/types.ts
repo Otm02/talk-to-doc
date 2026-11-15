@@ -50,6 +50,18 @@ export interface RateLimiter {
   peekDaily(key: string): Promise<number>;
 }
 
+/**
+ * The limiter could not give an answer in time, or at all. Callers never treat
+ * this as "allowed": a request that cannot be counted is refused, so an
+ * outage of the shared store cannot switch the limits off.
+ */
+export class LimiterUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super("The rate limiter is unavailable", { cause });
+    this.name = "LimiterUnavailableError";
+  }
+}
+
 export interface StateAdapters {
   documents: DocumentStore;
   rateLimiter: RateLimiter;

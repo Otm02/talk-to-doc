@@ -26,13 +26,12 @@ test("sends security headers", async ({ request }) => {
   );
 });
 
-test("health reports the memory driver locally", async ({ request }) => {
+test("health reports only what the browser needs", async ({ request }) => {
   const res = await request.get("/api/health");
   expect(res.status()).toBe(200);
-  expect(await res.json()).toMatchObject({
+  expect(await res.json()).toEqual({
     ok: true,
-    model: "gpt-realtime-2.1-mini",
+    version: expect.any(String),
     uploadMode: "direct",
-    state: "memory",
   });
 });

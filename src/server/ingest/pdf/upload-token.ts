@@ -3,10 +3,14 @@ import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { z } from "zod";
 import { EnvError, getEnv } from "../../env";
 import { AppError, catalogError } from "../../errors";
-import { parseWith } from "../../http";
+import { MAX_UPLOAD_TOKEN_BODY_BYTES, parseJsonBody } from "../../body";
 import { enforceRateLimit } from "../../security/rate-limit";
+import { getState } from "../../state";
+import { secondsUntilNextUtcDay } from "../../state/types";
 import {
   BLOB_TOKEN_TTL_MS,
+  DAILY_UPLOAD_CAP,
+  DAILY_UPLOAD_KEY,
   MAX_PDF_BYTES,
   UPLOAD_PATHNAME,
   UPLOAD_TOKEN_RATE,
@@ -38,12 +42,22 @@ export async function issueUploadToken(req: Request): Promise<Response> {
   const token = env.blobToken;
 
   await enforceRateLimit(req, "upload-token", UPLOAD_TOKEN_RATE);
-  const parsed = parseWith(
+  const parsed = await parseJsonBody(
+    req,
     TokenRequestSchema,
-    await req.json().catch(() => {
-      throw catalogError("invalid_request");
-    }),
+    MAX_UPLOAD_TOKEN_BODY_BYTES,
   );
+
+  // Counted only for a well-formed request, so junk cannot use up the day.
+  const today = await getState().rateLimiter.countDaily(
+    DAILY_UPLOAD_KEY,
+    DAILY_UPLOAD_CAP,
+  );
+  if (!today.allowed) {
+    throw catalogError("rate_limited", {
+      retryAfterSeconds: secondsUntilNextUtcDay(Date.now()),
+    });
+  }
 
   try {
     const result = await handleUpload({

@@ -84,7 +84,7 @@ describe("transcript cache", () => {
   });
 
   it("treats a store that throws as a miss, not an error", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const broken: DocumentStore = {
       get: async () => {
         throw new Error("redis down");
@@ -98,6 +98,7 @@ describe("transcript cache", () => {
     expect(await writeCachedTranscript(broken, "vid", "en", entry())).toBe(
       false,
     );
+    expect(warn).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
 });

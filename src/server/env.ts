@@ -1,4 +1,5 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
 
 // The only place that reads process.env. Validation is lazy (first call) so
@@ -56,6 +57,8 @@ const schema = z.object({
   VOICE_ENABLED: optional.pipe(bool.optional().transform((v) => v ?? true)),
   DAILY_SESSION_CAP: intInRange(0, 10000, 40),
   BLOB_READ_WRITE_TOKEN: optional,
+  IP_HASH_SALT: optional,
+  CRON_SECRET: optional,
   UPSTASH_REDIS_REST_URL: optional,
   UPSTASH_REDIS_REST_TOKEN: optional,
   KV_REST_API_URL: optional,
@@ -81,6 +84,10 @@ export interface Env {
   voiceEnabled: boolean;
   dailySessionCap: number;
   blobToken: string | undefined;
+  /** Keys the hash that turns a client IP into a limiter key. */
+  ipHashSalt: string;
+  /** Bearer token Vercel sends to cron routes. Unset means cron routes refuse everyone. */
+  cronSecret: string | undefined;
   upstash: { url: string; token: string } | undefined;
   stateDriver: StateDriver;
   onVercel: boolean;
@@ -130,6 +137,16 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
       "UPLOAD_MODE=direct is not allowed on Vercel (4.5 MB body cap)",
     );
   }
+  if (v.IP_HASH_SALT !== undefined && v.IP_HASH_SALT.length < 16) {
+    problems.push("IP_HASH_SALT must be at least 16 characters");
+  }
+  // Instances must agree on the key for one client, so a random salt is only
+  // acceptable where there is one process.
+  if (onVercel && v.IP_HASH_SALT === undefined) {
+    problems.push(
+      "IP_HASH_SALT is required on Vercel (every instance must hash an address the same way)",
+    );
+  }
   if (onVercel && !upstash) {
     problems.push(
       "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required on Vercel (in-memory state is not shared)",
@@ -150,6 +167,8 @@ export function parseEnv(source: Record<string, string | undefined>): Env {
     voiceEnabled: v.VOICE_ENABLED,
     dailySessionCap: v.DAILY_SESSION_CAP,
     blobToken: v.BLOB_READ_WRITE_TOKEN,
+    ipHashSalt: v.IP_HASH_SALT ?? randomBytes(32).toString("hex"),
+    cronSecret: v.CRON_SECRET,
     upstash,
     stateDriver: upstash ? "upstash" : "memory",
     onVercel,
