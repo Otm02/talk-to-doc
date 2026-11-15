@@ -17,6 +17,7 @@ describe("GET /api/health", () => {
       ok: true,
       version: expect.any(String),
       uploadMode: "direct",
+      state: "memory",
     });
     expect(JSON.stringify(body)).not.toContain("sk-test");
   });

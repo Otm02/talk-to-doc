@@ -57,6 +57,18 @@ describe("parseEnv", () => {
     expect(kv.upstash?.url).toBe("https://x.upstash.io");
   });
 
+  const onVercel = { ...upstash, IP_HASH_SALT: "x".repeat(16) };
+
+  it("keeps production keys on ttd and gives other environments their own", () => {
+    expect(
+      parseEnv({ ...onVercel, VERCEL_ENV: "production" }).stateNamespace,
+    ).toBe("ttd");
+    expect(
+      parseEnv({ ...onVercel, VERCEL_ENV: "preview" }).stateNamespace,
+    ).toBe("ttd-preview");
+    expect(parseEnv(upstash).stateNamespace).toBe("ttd-local");
+  });
+
   it("rejects half-configured upstash", () => {
     expect(() =>
       parseEnv({ UPSTASH_REDIS_REST_URL: "https://x.upstash.io" }),

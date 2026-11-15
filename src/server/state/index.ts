@@ -17,6 +17,8 @@ export function getState(): StateAdapters {
   cached = env.upstash
     ? createUpstashAdapters(
         createUpstashRedis(env.upstash.url, env.upstash.token),
+        undefined,
+        env.stateNamespace,
       )
     : createMemoryAdapters();
   return cached;
