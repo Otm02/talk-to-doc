@@ -3,31 +3,27 @@
 import { Keyboard, Mic, MicOff, PhoneOff, Square } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { EndConfirm } from "./end-confirm";
 
 interface Props {
   muted: boolean;
   /** Voice mode with a live mic: Mute only makes sense then. */
   canMute: boolean;
   speaking: boolean;
-  keyboardOpen: boolean;
-  /** Text mode always shows the composer. */
-  keyboardLocked: boolean;
   onToggleMute: () => void;
   onStopAnswer: () => void;
-  onToggleKeyboard: () => void;
+  /** Opens the composer; the screen then switches to its compact layout. */
+  onOpenKeyboard: () => void;
   onEnd: () => void;
 }
 
 const BTN = "h-14 min-w-14 flex-col gap-0.5 rounded-2xl px-2 text-xs";
 
-/** Thumb-zone controls. Every target is 56 px. */
+/**
+ * Thumb-zone controls for a voice chat with the composer closed. Every target
+ * is 56 px. With the composer open, the same controls sit in its row instead.
+ */
 export function ControlBar(p: Props) {
   const [confirming, setConfirming] = useState(false);
   return (
@@ -48,7 +44,11 @@ export function ControlBar(p: Props) {
           {p.muted ? "Unmute" : "Mute"}
         </Button>
         {p.speaking && (
-          <Button variant="outline" className={cn(BTN, "flex-1")} onClick={p.onStopAnswer}>
+          <Button
+            variant="outline"
+            className={cn(BTN, "flex-1")}
+            onClick={p.onStopAnswer}
+          >
             <Square aria-hidden />
             Stop answer
           </Button>
@@ -56,16 +56,16 @@ export function ControlBar(p: Props) {
         <Button
           variant="outline"
           className={cn(BTN, "flex-1")}
-          aria-pressed={p.keyboardOpen}
-          disabled={p.keyboardLocked}
-          onClick={p.onToggleKeyboard}
+          onClick={p.onOpenKeyboard}
         >
           <Keyboard aria-hidden />
           Keyboard
         </Button>
         <Button
-          variant="destructive"
-          className={cn(BTN, "flex-1 bg-destructive text-white hover:bg-destructive/90")}
+          className={cn(
+            BTN,
+            "flex-1 bg-destructive-solid text-white hover:bg-destructive-solid/90",
+          )}
           onClick={() => setConfirming(true)}
         >
           <PhoneOff aria-hidden />
@@ -73,30 +73,11 @@ export function ControlBar(p: Props) {
         </Button>
       </div>
 
-      <Sheet open={confirming} onOpenChange={setConfirming}>
-        <SheetContent
-          side="bottom"
-          showCloseButton={false}
-          className="gap-3 px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
-        >
-          <SheetTitle>End this chat?</SheetTitle>
-          <SheetDescription>
-            Your conversation stays on screen until you leave.
-          </SheetDescription>
-          <Button
-            className="h-14 bg-destructive text-white hover:bg-destructive/90"
-            onClick={() => {
-              setConfirming(false);
-              p.onEnd();
-            }}
-          >
-            End chat
-          </Button>
-          <Button variant="outline" className="h-14" onClick={() => setConfirming(false)}>
-            Keep talking
-          </Button>
-        </SheetContent>
-      </Sheet>
+      <EndConfirm
+        open={confirming}
+        onOpenChange={setConfirming}
+        onEnd={p.onEnd}
+      />
     </>
   );
 }

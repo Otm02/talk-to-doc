@@ -99,6 +99,19 @@ describe("createBrowserDeps", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("asks the browser's Permissions API about the mic", async () => {
+    // jsdom has none: unknown, not an error.
+    await expect(createBrowserDeps().queryMicPermission()).resolves.toBe(
+      "unknown",
+    );
+    const query = vi.fn(async () => ({ state: "denied" }));
+    vi.stubGlobal("navigator", { permissions: { query } });
+    await expect(createBrowserDeps().queryMicPermission()).resolves.toBe(
+      "denied",
+    );
+    expect(query).toHaveBeenCalledWith({ name: "microphone" });
+  });
+
   it("follows the page's visibility", () => {
     const { visibility } = createBrowserDeps();
     const listener = vi.fn();

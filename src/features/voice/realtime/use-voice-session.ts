@@ -33,6 +33,8 @@ export function useVoiceSession(
     () => ({
       start: (mode: Mode) => session.start(mode),
       end: () => session.end(),
+      /** Text chat to voice chat, in place. Call it straight from the tap. */
+      enableMic: () => session.enableMic(),
       setMuted: (muted: boolean) => session.setMuted(muted),
       stopAnswer: () => session.stopAnswer(),
       sendText: (text: string) => session.sendText(text),

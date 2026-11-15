@@ -14,6 +14,7 @@ import {
   CAP_WARNING_MS,
   HIDDEN_MS,
   IDLE_MS,
+  MIC_RETRY_MIN_MS,
   RECONNECT_GRACE_MS,
   failureForTransportError,
 } from "./session";
@@ -69,7 +70,7 @@ describe("starting a chat", () => {
       "connecting:negotiating",
       "connected",
     ]);
-    expect(h.mint).toHaveBeenCalledWith("doc-1", expect.any(AbortSignal));
+    expect(h.mint).toHaveBeenCalledWith("doc-1", expect.any(AbortSignal), []);
     expect(h.transport.lastConnect?.clientSecret).toBe(h.response.clientSecret);
     expect(h.transport.lastConnect?.micStream).toBe(h.micStreams[0]);
     expect(h.session.model).toBe("gpt-realtime-2.1-mini");
@@ -170,7 +171,7 @@ describe("failing to start", () => {
     ["budget", "budget_exhausted"],
     ["timeout", "session_connect_failed"],
     ["rejected", "session_connect_failed"],
-    ["network", "session_connect_failed"],
+    ["network", "session_network_failed"],
     ["unsupported", "session_connect_failed"],
   ] as const)("maps a %s connect failure to %s", async (kind, code) => {
     const h = await started("voice", { script: { failWith: kind, steps: [] } });
@@ -182,11 +183,17 @@ describe("failing to start", () => {
     const h = await started("voice", {
       mintError: new MintError("rate_limited", 42),
     });
-    expect(h.session.getState().connection).toEqual({
+    const c = h.session.getState().connection;
+    expect(c).toMatchObject({
       status: "failed",
       code: "rate_limited",
       retryAfterSeconds: 42,
     });
+    // Also a deadline, fixed when the refusal arrived, so a countdown reads
+    // the clock instead of counting ticks. (The helper lets ~50 ms pass.)
+    const retryAt = c.status === "failed" ? (c.retryAt ?? 0) : 0;
+    expect(retryAt).toBeLessThanOrEqual(Date.now() + 42_000);
+    expect(retryAt).toBeGreaterThan(Date.now() + 41_000);
     h.expectAllReleased();
   });
 
@@ -197,6 +204,7 @@ describe("failing to start", () => {
     expect(h.session.getState().connection).not.toHaveProperty(
       "retryAfterSeconds",
     );
+    expect(h.session.getState().connection).not.toHaveProperty("retryAt");
   });
 
   it("fails cleanly when no transport can be built", async () => {
@@ -429,6 +437,443 @@ describe("the microphone disappears mid-chat", () => {
     const before = h.session.getState();
     expect(before.mode).toBe("text");
     expect(before.micIssue).toBe("denied"); // the original reason is kept
+  });
+});
+
+describe("turning the microphone on in a text chat", () => {
+  // The session never calls fetch itself (mint and transport are injected),
+  // so any call here would be a request the retry flow must not make.
+  let fetchSpy: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    fetchSpy = vi.fn(() => Promise.reject(new Error("no network in tests")));
+    vi.stubGlobal("fetch", fetchSpy);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** A voice start whose mic was refused: connected, in text mode, banner up. */
+  async function deniedChat(options: HarnessOptions = {}): Promise<Harness> {
+    const h = await started("voice", { mic: "denied", ...options });
+    expect(status(h)).toBe("connected");
+    expect(h.session.getState().mode).toBe("text");
+    expect(h.mint).toHaveBeenCalledOnce();
+    h.requestMic.mockClear();
+    return h;
+  }
+
+  /** Everything a retry that found no mic must leave untouched. */
+  function expectNoNetwork(h: Harness) {
+    expect(h.mint).toHaveBeenCalledOnce(); // the chat's own secret, nothing since
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(h.createTransport).toHaveBeenCalledOnce();
+    expect(h.transports).toHaveLength(1);
+    expect(h.transport.micUpgrades).toEqual([]);
+    expect(h.transport.sent).toEqual([]);
+    expect(h.transport.closeCount).toBe(0);
+    expect(status(h)).toBe("connected");
+    expect(h.session.getState().mode).toBe("text");
+  }
+
+  it("stops at the permission check when the browser says denied: no getUserMedia, no API call", async () => {
+    const h = await deniedChat();
+    // Even a mic that would work is not asked for: the browser said no.
+    h.setMic("ok", "denied");
+
+    h.session.enableMic();
+    expect(h.session.getState().micRetry).toBe("working");
+    await settle();
+
+    expect(h.queryMicPermission).toHaveBeenCalledOnce();
+    expect(h.requestMic).not.toHaveBeenCalled();
+    expectNoNetwork(h);
+    const s = h.session.getState();
+    expect(s.micIssue).toBe("denied");
+    expect(s.micRetry).toBe("idle"); // the button is usable again
+    expect(s.micRetryFails).toBe(1);
+  });
+
+  it.each([
+    ["denied", "NotAllowedError"],
+    ["not_found", "NotFoundError"],
+    ["in_use", "NotReadableError"],
+  ] as const)(
+    "getUserMedia fails with %s (%s): the reason is shown and nothing is requested",
+    async (reason, errorName) => {
+      void errorName; // only in the test's name: mic.test.ts maps names to reasons
+      const h = await deniedChat();
+      h.setMic(reason, "prompt");
+
+      h.session.enableMic();
+      await settle();
+
+      expect(h.requestMic).toHaveBeenCalledOnce();
+      expectNoNetwork(h);
+      const s = h.session.getState();
+      expect(s.micIssue).toBe(reason);
+      expect(s.micRetry).toBe("idle");
+      expect(s.micRetryFails).toBe(1);
+    },
+  );
+
+  it("can be tapped again and again without ever minting a secret", async () => {
+    const h = await deniedChat();
+    h.setMic("denied", "unknown");
+    for (let i = 0; i < 8; i += 1) {
+      h.session.enableMic();
+      await settle(MIC_RETRY_MIN_MS);
+    }
+    expect(h.requestMic).toHaveBeenCalledTimes(8);
+    expect(h.session.getState().micRetryFails).toBe(8);
+    expectNoNetwork(h);
+  });
+
+  it("debounces: taps under a second apart count once, and a tap while checking is ignored", async () => {
+    const h = await deniedChat();
+    h.setMic("denied", "prompt");
+
+    h.session.enableMic();
+    h.session.enableMic(); // same tick: already checking
+    await settle();
+    expect(h.session.getState().micRetry).toBe("idle");
+    h.session.enableMic(); // done checking, but too soon
+    await settle(MIC_RETRY_MIN_MS - 10);
+    expect(h.queryMicPermission).toHaveBeenCalledOnce();
+    expect(h.requestMic).toHaveBeenCalledOnce();
+
+    await settle(10);
+    h.session.enableMic();
+    await settle();
+    expect(h.requestMic).toHaveBeenCalledTimes(2);
+
+    // A permission prompt left open keeps the check running for as long as
+    // it takes; taps in the meantime do not stack up more prompts.
+    h.setMic("pending", "prompt");
+    await settle(MIC_RETRY_MIN_MS);
+    h.session.enableMic();
+    await settle(5 * MIC_RETRY_MIN_MS);
+    expect(h.session.getState().micRetry).toBe("working");
+    h.session.enableMic();
+    await settle();
+    expect(h.requestMic).toHaveBeenCalledTimes(3);
+    expectNoNetwork(h);
+
+    h.session.end();
+    h.resolveMic();
+    await settle();
+    h.expectAllReleased();
+  });
+
+  it("upgrades in place when the mic works: same connection, same secret, transcript kept", async () => {
+    const h = await deniedChat({ script: scenarioScript("text-turn") });
+    h.session.sendText("What is this about?");
+    await settle(1500);
+    const before = transcript(h.session.getState());
+    expect(before).toHaveLength(2);
+    h.transport.sent.length = 0;
+    h.setMic("ok", "prompt");
+
+    h.session.enableMic();
+    await settle();
+
+    const mic = h.micStreams.at(-1);
+    expect(h.requestMic).toHaveBeenCalledOnce();
+    // The track went into the transport that was already connected...
+    expect(h.transport.micUpgrades).toEqual([mic]);
+    // ...and nothing else moved: no new secret, no new transport, no request.
+    expect(h.mint).toHaveBeenCalledOnce();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(h.createTransport).toHaveBeenCalledOnce();
+    expect(h.transport.closeCount).toBe(0);
+    expect(h.transport.sent).toEqual([]);
+
+    const s = h.session.getState();
+    expect(s.connection.status).toBe("connected");
+    expect(s.mode).toBe("voice");
+    expect(s.micIssue).toBeNull();
+    expect(s.micRetry).toBe("idle");
+    expect(s.micRetryFails).toBe(0);
+    expect(transcript(s)).toEqual(before);
+
+    // It is a real voice chat now: mute works, typed questions get spoken answers.
+    h.session.setMuted(true);
+    expect(mic?.tracks[0]?.enabled).toBe(false);
+    h.session.setMuted(false);
+    h.session.sendText("And the margins?");
+    expect(h.transport.sent.at(-1)).toEqual({
+      type: "response.create",
+      event_id: expect.any(String),
+    });
+
+    h.session.end();
+    h.expectAllReleased();
+  });
+
+  it("clears the count of failed retries once a retry works", async () => {
+    const h = await deniedChat();
+    h.setMic("in_use", "prompt");
+    h.session.enableMic();
+    await settle(MIC_RETRY_MIN_MS);
+    expect(h.session.getState().micRetryFails).toBe(1);
+
+    h.setMic("ok", "granted");
+    h.session.enableMic();
+    await settle();
+    expect(h.session.getState()).toMatchObject({
+      mode: "voice",
+      micIssue: null,
+      micRetryFails: 0,
+    });
+    expect(h.mint).toHaveBeenCalledOnce();
+  });
+
+  it("works the same from a chat that was started as text on purpose", async () => {
+    const h = await started("text");
+    expect(h.session.getState().micIssue).toBeNull();
+    expect(h.transport.lastConnect?.micStream).toBeNull();
+
+    h.session.enableMic();
+    await settle();
+
+    expect(h.transport.micUpgrades).toEqual([h.micStreams[0]]);
+    expect(h.session.getState().mode).toBe("voice");
+    expect(h.mint).toHaveBeenCalledOnce();
+    h.session.end();
+    h.expectAllReleased();
+  });
+
+  it("text mode itself mints exactly one secret per chat", async () => {
+    const h = await started("text", { script: scenarioScript("text-turn") });
+    h.session.sendText("One");
+    await settle(1500);
+    h.session.sendText("Two");
+    await settle(1500);
+    h.setMic("denied", "denied");
+    h.session.enableMic();
+    await settle(MIC_RETRY_MIN_MS);
+    expect(h.mint).toHaveBeenCalledOnce();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to exactly one reconnect with one fresh secret when the track cannot be swapped in", async () => {
+    const h = await deniedChat({ script: { steps: [], micUpgrade: "fail" } });
+    const first = h.transport;
+    h.setMic("ok", "prompt");
+
+    h.session.enableMic();
+    await settle(50);
+
+    const mic = h.micStreams.at(-1);
+    expect(first.micUpgrades).toEqual([mic]); // the in-place path was tried first
+    expect(first.closeCount).toBe(1);
+    // One reconnect, one new secret, and only after getUserMedia succeeded.
+    expect(h.mint).toHaveBeenCalledTimes(2);
+    expect(h.transports).toHaveLength(2);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // The stream already in hand is reused: no second prompt.
+    expect(h.requestMic).toHaveBeenCalledOnce();
+    expect(h.transport.lastConnect?.micStream).toBe(mic);
+    expect(mic?.tracks[0]?.readyState).toBe("live");
+
+    const s = h.session.getState();
+    expect(s.connection.status).toBe("connected");
+    expect(s.mode).toBe("voice");
+    expect(s.micIssue).toBeNull();
+    expect(s.micRetry).toBe("idle");
+
+    // Still exactly two after the dust settles: nothing loops.
+    await settle(5000);
+    expect(h.mint).toHaveBeenCalledTimes(2);
+    h.session.end();
+    h.expectAllReleased();
+  });
+
+  it("keeps the typed turns on screen and gives them to the replacement session as history", async () => {
+    const h = await deniedChat({ script: { steps: [], micUpgrade: "fail" } });
+    h.session.sendText("What was revenue?");
+    await settle(2000);
+    const before = h.session.getState();
+    const turns = before.order.map((id) => before.items[id]);
+    expect(turns.length).toBeGreaterThanOrEqual(2); // the question and its answer
+    expect(turns.every((t) => t?.status === "done")).toBe(true);
+    h.setMic("ok", "prompt");
+
+    h.session.enableMic();
+    await settle(50);
+
+    // The first secret was minted with no history; the second carries the talk.
+    expect(h.mint).toHaveBeenCalledTimes(2);
+    expect(h.mint.mock.calls[0]?.[2] ?? []).toEqual([]);
+    expect(h.mint.mock.calls[1]?.[2]).toEqual(
+      turns.map((t) => ({ role: t?.role, text: t?.text })),
+    );
+    // And nothing vanished from the screen.
+    const after = h.session.getState();
+    expect(after.connection.status).toBe("connected");
+    expect(after.order.slice(0, turns.length)).toEqual(before.order);
+    expect(after.items[before.order[0] ?? ""]?.text).toBe("What was revenue?");
+    h.session.end();
+    h.expectAllReleased();
+  });
+
+  it("replaces a mic that died in a chat that began as voice", async () => {
+    const h = await started("voice");
+    const dead = h.micStreams[0];
+    dead?.tracks[0]?.end();
+    expect(h.session.getState()).toMatchObject({
+      mode: "text",
+      micIssue: "unavailable",
+    });
+
+    h.session.enableMic();
+    await settle();
+
+    const fresh = h.micStreams[1];
+    expect(dead?.tracks[0]?.stop).toHaveBeenCalled();
+    expect(dead?.tracks[0]?.listenerCount("ended")).toBe(0);
+    expect(h.transport.micUpgrades).toEqual([fresh]);
+    expect(h.session.getState()).toMatchObject({
+      mode: "voice",
+      micIssue: null,
+    });
+    expect(h.mint).toHaveBeenCalledOnce();
+
+    // The new mic is watched like the first one was.
+    fresh?.tracks[0]?.end();
+    expect(h.session.getState().mode).toBe("text");
+    h.session.end();
+    h.expectAllReleased();
+  });
+
+  it("unlocks audio output inside the tap, before anything is awaited", async () => {
+    const h = await started("text");
+    const context = h.contexts[0];
+    const element = h.elements[0];
+    h.session.enableMic();
+    expect(context?.resume).toHaveBeenCalledOnce();
+    expect(element?.play).toHaveBeenCalledOnce();
+    await settle();
+  });
+
+  it("does nothing outside a connected text chat", async () => {
+    const idle = makeHarness();
+    idle.session.enableMic();
+
+    const connecting = makeHarness({
+      script: { connectDelayMs: 500, steps: [] },
+    });
+    connecting.session.start("text");
+    await settle(50);
+    connecting.session.enableMic();
+
+    const voice = await started("voice");
+    voice.requestMic.mockClear();
+    voice.session.enableMic();
+
+    const ended = await started("text");
+    ended.session.end();
+    ended.session.enableMic();
+
+    await settle();
+    for (const h of [idle, connecting, voice, ended]) {
+      expect(h.queryMicPermission).not.toHaveBeenCalled();
+      expect(h.requestMic).not.toHaveBeenCalled();
+      expect(h.session.getState().micRetry).toBe("idle");
+    }
+    connecting.session.end();
+    voice.session.end();
+  });
+
+  it("drops everything if the chat ends during the permission check", async () => {
+    const h = await deniedChat();
+    h.setMic("ok", "prompt");
+    let answer: (p: "granted") => void = () => {};
+    h.queryMicPermission.mockImplementationOnce(
+      () => new Promise((resolve) => (answer = resolve)),
+    );
+    h.session.enableMic();
+    h.session.end();
+    expect(h.session.getState().micRetry).toBe("idle");
+    answer("granted");
+    await settle();
+    expect(h.requestMic).not.toHaveBeenCalled();
+    h.expectAllReleased();
+  });
+
+  it("stops a mic that arrives after the chat ended", async () => {
+    const h = await deniedChat();
+    h.setMic("pending", "prompt");
+    h.session.enableMic();
+    await settle();
+    h.session.end();
+    const late = h.resolveMic();
+    await settle();
+    expect(late.tracks[0]?.readyState).toBe("ended");
+    expect(h.transport.micUpgrades).toEqual([]);
+    expect(h.session.getState().mode).toBe("text");
+    h.expectAllReleased();
+  });
+
+  it("leaves an ended chat alone if it ends while the track is being swapped", async () => {
+    const h = await deniedChat();
+    h.setMic("ok", "prompt");
+    let finish: (ok: boolean) => void = () => {};
+    vi.spyOn(h.transport, "upgradeMic").mockImplementation(
+      () => new Promise((resolve) => (finish = resolve)),
+    );
+    h.session.enableMic();
+    await settle();
+    h.session.end();
+    finish(true);
+    await settle();
+    expect(h.session.getState().connection).toEqual({
+      status: "ended",
+      reason: "user",
+    });
+    expect(h.session.getState().mode).toBe("text");
+    expect(h.mint).toHaveBeenCalledOnce();
+    h.expectAllReleased();
+  });
+
+  it("stays a text chat, with the button free, if something unexpected throws", async () => {
+    const h = await deniedChat();
+    h.queryMicPermission.mockRejectedValueOnce(new Error("boom"));
+    h.session.enableMic();
+    await settle();
+    expect(h.session.getState()).toMatchObject({
+      mode: "text",
+      micRetry: "idle",
+    });
+    expectNoNetwork(h);
+  });
+
+  it("notes each step in the dev recording", async () => {
+    const failing = await deniedChat({ recorder: true });
+    failing.setMic("in_use", "prompt");
+    failing.session.enableMic();
+    await settle();
+    const log = failing.recorders[0]?.toJsonl() ?? "";
+    expect(log).toContain('"event":"mic_retry"');
+    expect(log).toContain('"reason":"in_use"');
+
+    const upgraded = await deniedChat({ recorder: true });
+    upgraded.setMic("ok", "prompt");
+    upgraded.session.enableMic();
+    await settle();
+    expect(upgraded.recorders[0]?.toJsonl()).toContain(
+      '"event":"mic_upgraded"',
+    );
+
+    const restarted = await deniedChat({
+      recorder: true,
+      script: { steps: [], micUpgrade: "fail" },
+    });
+    restarted.setMic("ok", "prompt");
+    restarted.session.enableMic();
+    await settle(50);
+    expect(restarted.recorders).toHaveLength(2);
+    expect(restarted.recorders[1]?.toJsonl()).toContain(
+      '"event":"mic_restart"',
+    );
+    for (const h of [failing, upgraded, restarted]) h.session.end();
   });
 });
 

@@ -61,6 +61,25 @@ describe("createTransport", () => {
     }
   });
 
+  it("lets the URL make the in-place mic upgrade refuse", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [query, accepted] of [
+        ["?mockRealtime=text-turn", true],
+        ["?mockRealtime=text-turn&mockMicUpgrade=fail", false],
+      ] as const) {
+        const t = await createTransport({ audioElement: null }, query);
+        const p = t.connect({ clientSecret: "x", micStream: null });
+        await vi.advanceTimersByTimeAsync(200);
+        await p;
+        await expect(t.upgradeMic({} as MediaStream)).resolves.toBe(accepted);
+        t.close();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("builds the WebRTC transport otherwise", async () => {
     vi.stubGlobal("RTCPeerConnection", class {});
     const t = await createTransport({ audioElement: fakeAudioElement() }, "");

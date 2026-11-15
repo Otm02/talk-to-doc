@@ -1,4 +1,5 @@
 import { z } from "zod";
+import "@/lib/zod-jitless";
 
 // Body of a successful POST /api/realtime/session. Shared so the server
 // builds it and the browser validates it from one definition. The browser
@@ -17,5 +18,10 @@ export type SessionResponse = z.infer<typeof SessionResponseSchema>;
 
 /** The shape every route handler uses for errors. */
 export const ErrorBodySchema = z.object({
-  error: z.object({ code: z.string() }),
+  error: z.object({
+    code: z.string(),
+    /** Whole seconds until a retry can work; on every 429. */
+    // A malformed wait must not discard the error code beside it.
+    retryAfterSec: z.number().positive().optional().catch(undefined),
+  }),
 });

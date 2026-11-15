@@ -1,13 +1,7 @@
 "use client";
 
 import { Check, ChevronDown, ChevronUp, Copy, Search, X } from "lucide-react";
-import {
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -16,6 +10,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import type { ReferenceTarget } from "./references";
 import {
   groupsToPlainText,
   indexMatches,
@@ -30,14 +25,31 @@ const BATCH = 20;
 
 type CopyState = "idle" | "copied" | "failed";
 
+/** How long the page or paragraph a chip pointed at stays marked. */
+export const HIGHLIGHT_MS = 1600;
+
+/**
+ * Where to open the sheet: the page, or the transcript paragraph, that an
+ * answer cited. `nonce` changes on every tap, so tapping the same chip twice
+ * scrolls and highlights again.
+ */
+export type TextFocus = ReferenceTarget & { nonce: number };
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   groups: TextGroup[];
   complete: boolean;
+  focus?: TextFocus | null;
 }
 
-export function FullTextSheet({ open, onOpenChange, groups, complete }: Props) {
+export function FullTextSheet({
+  open,
+  onOpenChange,
+  groups,
+  complete,
+  focus = null,
+}: Props) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -45,7 +57,7 @@ export function FullTextSheet({ open, onOpenChange, groups, complete }: Props) {
         showCloseButton={false}
         className="data-[side=bottom]:h-dvh gap-0 overflow-hidden rounded-none pt-[env(safe-area-inset-top)]"
       >
-        <SheetBody groups={groups} complete={complete} />
+        <SheetBody groups={groups} complete={complete} focus={focus} />
       </SheetContent>
     </Sheet>
   );
@@ -54,9 +66,11 @@ export function FullTextSheet({ open, onOpenChange, groups, complete }: Props) {
 function SheetBody({
   groups,
   complete,
+  focus,
 }: {
   groups: TextGroup[];
   complete: boolean;
+  focus: TextFocus | null;
 }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -73,8 +87,50 @@ function SheetBody({
   const activeIndex = matches.total ? Math.min(active, matches.total - 1) : 0;
 
   // A match in a group that isn't rendered yet must be reachable.
-  const activeGroup = matches.total ? (matches.groupOfMatch[activeIndex] ?? -1) : -1;
-  const rendered = Math.min(groups.length, Math.max(visible, activeGroup + 1));
+  const activeGroup = matches.total
+    ? (matches.groupOfMatch[activeIndex] ?? -1)
+    : -1;
+  // The same goes for a page a chip points at: page 900 has to exist in the
+  // DOM before it can be scrolled to.
+  const focusGroup = focus
+    ? groups.findIndex((g) => g.id === focus.groupId)
+    : -1;
+  const rendered = Math.min(
+    groups.length,
+    Math.max(visible, activeGroup + 1, focusGroup + 1),
+  );
+
+  useEffect(() => {
+    if (!focus || focusGroup < 0) return;
+    const root = scrollRef.current;
+    if (!root) return;
+    const find = (id: string) =>
+      [...root.querySelectorAll<HTMLElement>("[data-ref-id]")].find(
+        (el) => el.dataset["refId"] === id,
+      );
+    const el =
+      (focus.unitId ? find(focus.unitId) : undefined) ?? find(focus.groupId);
+    if (!el) return;
+    const scroll = () => el.scrollIntoView({ block: "start" });
+    scroll();
+    // Off-screen pages are laid out lazily (content-visibility), so the first
+    // scroll lands on estimated heights. Once more, after real layout.
+    const frame =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame(scroll)
+        : null;
+    // An attribute, not state: nothing else on the sheet has to re-render.
+    el.setAttribute("data-highlight", "true");
+    const timer = setTimeout(
+      () => el.removeAttribute("data-highlight"),
+      HIGHLIGHT_MS,
+    );
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      el.removeAttribute("data-highlight");
+    };
+  }, [focus, focusGroup]);
 
   useEffect(() => {
     const node = sentinelRef.current;
@@ -204,8 +260,9 @@ function SheetBody({
           <section
             key={group.id}
             aria-label={group.label}
+            data-ref-id={group.id}
             // Skips layout and paint for groups far off screen.
-            className="border-b py-3 [contain-intrinsic-size:auto_240px] [content-visibility:auto]"
+            className="scroll-mt-2 border-b py-3 [contain-intrinsic-size:auto_240px] [content-visibility:auto]"
           >
             <h4 className="mb-1 text-xs font-semibold text-muted-foreground">
               {group.label}
@@ -256,14 +313,17 @@ function UnitText({
   const parts = count > 0 ? splitByQuery(unit.text, query) : null;
   let seen = 0;
   return (
-    <p className="py-1 text-sm leading-relaxed break-words whitespace-pre-wrap">
+    <p
+      data-ref-id={unit.id}
+      className="scroll-mt-2 py-1 text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap"
+    >
       {unit.stamp && (
         <a
           href={unit.stamp.href}
           target="_blank"
           rel="noopener noreferrer"
           aria-label={`Open at ${unit.stamp.label} on YouTube`}
-          className="mr-2 inline-flex min-h-11 items-center font-mono text-xs text-primary underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="mr-2 inline-flex min-h-11 min-w-11 items-center font-mono text-xs text-primary underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {unit.stamp.label}
         </a>

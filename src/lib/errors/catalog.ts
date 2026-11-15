@@ -14,7 +14,7 @@ export const ERROR_CATALOG = {
   },
   rate_limited: {
     status: 429,
-    message: "Too many tries. Wait a minute and try again.",
+    message: "Too many tries. Try again when the timer ends.",
   },
   // Session minting (M5). Copy mirrors docs/SPEC.md sections 4.2 and 4.3.
   voice_disabled: {

@@ -212,6 +212,14 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 ## M8 Mobile polish
 
+**Built (differences from the scope below)**
+- The scope was re-set by the M7 phone checkpoint (S24+, Chrome and Samsung Internet), which found three bugs: the soft keyboard crushed the transcript, "Try microphone again" minted a secret per tap and locked the IP out, and a 429 was shown as "Offline" with a wait that never moved. M8 fixed those first: a compact layout sized from `visualViewport`; a mic retry that checks permission and `getUserMedia` before touching the network and then upgrades the chat in place (`replaceTrack`, with a one-reconnect fallback); honest status words with a live countdown; and the per-IP mint limit raised from 5 to 15 per 10 minutes.
+- Two extras: grounding chips (SPEC EX-01) and transcript export (EX-02).
+- `e2e/layout.spec.ts` runs axe (WCAG 2.1 A and AA), a sideways-scroll check and a 44 px tap-target check on every state at 390x844, 360x780 and 430x932, plus 390x844 in dark mode. Inline chips are the one exception to 44 px (about 32 px: taller would overlap the chip on the next line).
+- A web app manifest and icons (`pnpm icons`). Lighthouse mobile on the landing page: accessibility 100, best practices 100, after turning off zod's eval probe, which the CSP was blocking on every load.
+- Wake lock was already built and tested in M7. The iOS audio items and the reduced-motion snapshot were not redone here.
+- The in-place mic upgrade was checked live on 2026-11-15 on desktop Chromium (reference §2: accepted, heard and answered on one secret). The live pass on real phones (MC-4) is still to do and needs a go-ahead first.
+
 **Scope**
 - Layout audit at 390x844 and 360x740: `100dvh`, safe-area insets, bottom bar within thumb reach, no horizontal scroll, long titles truncate.
 - Keyboard overlap on iOS and Android; focus order; visible focus rings; reduced motion.

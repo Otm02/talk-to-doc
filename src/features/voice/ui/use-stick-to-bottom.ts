@@ -34,7 +34,9 @@ export function useStickToBottom(changeKey: unknown) {
     if (!el) return;
     stuck.current = true;
     setBehind(false);
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduce = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
     el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
   }, []);
 

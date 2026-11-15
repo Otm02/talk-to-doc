@@ -27,6 +27,37 @@ function browserEnvironment(): MicEnvironment {
   };
 }
 
+/** "unknown" = the browser cannot say (no Permissions API, or not for the mic). */
+export type MicPermission = "granted" | "denied" | "prompt" | "unknown";
+
+export interface PermissionEnvironment {
+  permissions?:
+    | { query(descriptor: { name: string }): Promise<{ state: string }> }
+    | undefined;
+}
+
+/**
+ * What the browser would do if we asked for the mic now, without asking.
+ * "denied" means getUserMedia would fail with no prompt, so a retry can go
+ * straight to explaining how to change the setting. It never throws: Firefox
+ * and older Safari reject the "microphone" name, and that just means unknown.
+ */
+export async function queryMicPermission(
+  env: PermissionEnvironment = {
+    permissions: globalThis.navigator?.permissions,
+  },
+): Promise<MicPermission> {
+  try {
+    const status = await env.permissions?.query({ name: "microphone" });
+    const state = status?.state;
+    return state === "granted" || state === "denied" || state === "prompt"
+      ? state
+      : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export function micFailureFromError(err: unknown): MicFailure {
   const name =
     typeof err === "object" && err !== null && "name" in err

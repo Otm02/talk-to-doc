@@ -14,9 +14,16 @@ export function formatClock(totalSeconds: number): string {
 /** Elapsed time while connected. Turns amber and says so when a minute is left. */
 export function SessionTimer({
   maxSeconds,
+  quiet = false,
   now = Date.now,
 }: {
   maxSeconds: number | null;
+  /**
+   * The slim header has room for the title, the pill and the menu only: the
+   * clock stays mounted (it counts from its first render) but out of sight,
+   * until the last minute makes it worth the space.
+   */
+  quiet?: boolean;
   /** Injected so tests control the clock. */
   now?: () => number;
 }) {
@@ -37,7 +44,8 @@ export function SessionTimer({
       data-testid="session-timer"
       data-warning={warn}
       className={cn(
-        "inline-flex items-center gap-1 text-sm tabular-nums",
+        "shrink-0 items-center gap-1 text-sm tabular-nums",
+        quiet && !warn ? "hidden" : "inline-flex",
         warn ? "font-medium text-warning-foreground" : "text-muted-foreground",
       )}
     >
@@ -55,7 +63,8 @@ export function TimeWarning({ secondsLeft }: { secondsLeft: number }) {
       data-testid="time-warning"
       className="mx-4 rounded-xl border border-warning/50 bg-warning/15 px-3 py-2 text-sm text-warning-foreground"
     >
-      About {Math.max(1, Math.round(secondsLeft / 60))} minute left in this chat.
+      About {Math.max(1, Math.round(secondsLeft / 60))} minute left in this
+      chat.
     </p>
   );
 }

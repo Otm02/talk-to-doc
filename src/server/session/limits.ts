@@ -1,9 +1,11 @@
 import "server-only";
 import type { RateRule } from "../state";
 
-// Five session starts per IP per ten minutes: enough to retry a few times,
-// too few for a loop to run up a bill.
-export const SESSION_IP_RATE: RateRule = { max: 5, windowMs: 10 * 60_000 };
+// Fifteen session starts per IP per ten minutes. Minting a secret costs
+// nothing, and several phones behind one address (or one phone on two
+// browsers) share this bucket, so it only has to stop a loop. Actual spend is
+// guarded by DAILY_SESSION_CAP and by OpenAI's hard limit on the key.
+export const SESSION_IP_RATE: RateRule = { max: 15, windowMs: 10 * 60_000 };
 
 /** Key for RateLimiter.countDaily / peekDaily; one counter for the whole app. */
 export const DAILY_SESSION_KEY = "session-starts";

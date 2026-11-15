@@ -3,6 +3,7 @@ import { FakeStream, asStream } from "@test/realtime/fakes";
 import {
   MIC_CONSTRAINTS,
   micFailureFromError,
+  queryMicPermission,
   requestMic,
   stopStream,
 } from "./mic";
@@ -94,5 +95,53 @@ describe("stopStream", () => {
     stopStream(asStream(stream));
     expect(stream.tracks[0]?.stop).toHaveBeenCalledOnce();
     expect(() => stopStream(null)).not.toThrow();
+  });
+});
+
+describe("queryMicPermission", () => {
+  const withState = (state: string) => ({
+    permissions: { query: vi.fn(async () => ({ state })) },
+  });
+
+  it.each(["granted", "denied", "prompt"] as const)(
+    "reports %s as the browser gives it",
+    async (state) => {
+      const env = withState(state);
+      await expect(queryMicPermission(env)).resolves.toBe(state);
+      expect(env.permissions.query).toHaveBeenCalledWith({
+        name: "microphone",
+      });
+    },
+  );
+
+  it("is unknown when there is no Permissions API", async () => {
+    await expect(queryMicPermission({})).resolves.toBe("unknown");
+    await expect(queryMicPermission({ permissions: undefined })).resolves.toBe(
+      "unknown",
+    );
+    // No argument: reads the real navigator, which Node tests do not have.
+    await expect(queryMicPermission()).resolves.toBe("unknown");
+  });
+
+  it("is unknown, not an error, when the browser rejects the microphone name", async () => {
+    // Firefox: query() throws a TypeError for names it does not know.
+    const throws = {
+      permissions: {
+        query: () => {
+          throw new TypeError("'microphone' is not a valid PermissionName");
+        },
+      },
+    };
+    await expect(queryMicPermission(throws)).resolves.toBe("unknown");
+    const rejects = {
+      permissions: { query: async () => Promise.reject(new Error("nope")) },
+    };
+    await expect(queryMicPermission(rejects)).resolves.toBe("unknown");
+  });
+
+  it("is unknown for a state it has never heard of", async () => {
+    await expect(queryMicPermission(withState("maybe"))).resolves.toBe(
+      "unknown",
+    );
   });
 });

@@ -53,6 +53,7 @@ describe("useVoiceSession", () => {
     expect(typeof api().subscribeLevel).toBe("function");
     expect(Object.keys(api().actions).sort()).toEqual([
       "downloadEvents",
+      "enableMic",
       "end",
       "retryText",
       "sendText",
@@ -77,6 +78,28 @@ describe("useVoiceSession", () => {
     // The mock reply carries a usage block, priced on the model the server named.
     expect(api().estimatedCost?.usd).toBeGreaterThan(0);
     expect(api().state.usage.responses).toBe(1);
+  });
+
+  it("turns a text chat into a voice chat through the same session", async () => {
+    const h = makeHarness();
+    const { api } = mountHook(h);
+    act(() => api().actions.start("text"));
+    await settle(100);
+    expect(api().state.mode).toBe("text");
+
+    act(() => api().actions.enableMic());
+    expect(api().state.micRetry).toBe("working");
+    await settle(10);
+    expect(api().state.mode).toBe("voice");
+    expect(api().state.micRetry).toBe("idle");
+    expect(h.mint).toHaveBeenCalledOnce();
+    // The other controls go through the same session too.
+    act(() => api().actions.setMuted(true));
+    expect(api().state.muted).toBe(true);
+    act(() => api().actions.stopAnswer());
+    act(() => api().actions.retryText("missing"));
+    act(() => api().actions.end());
+    expect(api().state.connection.status).toBe("ended");
   });
 
   it("keeps its actions and level feed stable across renders", async () => {
@@ -120,7 +143,11 @@ describe("useVoiceSession", () => {
     expect(api().state.connection.status).toBe("idle");
     act(() => api().actions.start("text"));
     await settle(100);
-    expect(h.mint).toHaveBeenLastCalledWith("doc-2", expect.any(AbortSignal));
+    expect(h.mint).toHaveBeenLastCalledWith(
+      "doc-2",
+      expect.any(AbortSignal),
+      [],
+    );
   });
 
   it("downloads the dev event log only when there is one", async () => {

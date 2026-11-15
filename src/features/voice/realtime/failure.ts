@@ -15,6 +15,9 @@ const CLIENT_COPY = {
     "The microphone isn't available here. You can type your questions instead.",
   session_reconnect_failed:
     "Connection lost. Check your network and try again.",
+  // A request never reached a server (as opposed to a server saying no).
+  session_network_failed:
+    "You're offline or the network dropped. Check your connection and try again.",
 } as const;
 
 export type ClientFailureCode = keyof typeof CLIENT_COPY;

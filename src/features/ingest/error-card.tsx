@@ -1,4 +1,5 @@
 import { AlertCircle } from "lucide-react";
+import { InitialWait, RetryButton } from "@/components/retry-button";
 import { Button } from "@/components/ui/button";
 import { errorCopy, type RecoveryAction } from "./error-copy";
 
@@ -12,32 +13,43 @@ const LABEL: Record<RecoveryAction, string> = {
 
 export function ErrorCard({
   code,
-  retryAfterSeconds,
+  retryAt,
   onAction,
 }: {
   code: string;
-  retryAfterSeconds?: number;
+  /** Deadline (ms since epoch) from a 429; only "Try again" waits for it. */
+  retryAt?: number;
   onAction: (action: RecoveryAction) => void;
 }) {
   const copy = errorCopy(code);
+  // Choosing another file or editing the link is never rate limited.
+  const waitUntil = copy.action === "retry" ? retryAt : undefined;
   return (
-    <div
-      role="alert"
-      className="flex flex-col gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4"
-    >
-      <div className="flex items-start gap-2">
-        <AlertCircle aria-hidden className="mt-0.5 size-5 shrink-0 text-destructive" />
-        <p className="text-sm">{copy.message}</p>
-      </div>
-      {retryAfterSeconds ? (
-        <p className="text-sm text-muted-foreground">
-          You can try again in {retryAfterSeconds}{" "}
-          {retryAfterSeconds === 1 ? "second" : "seconds"}.
+    <div className="flex flex-col gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+      {/* Only this line is the alert: the ticking button must stay outside it. */}
+      <div role="alert" className="flex items-start gap-2">
+        <AlertCircle
+          aria-hidden
+          className="mt-0.5 size-5 shrink-0 text-destructive"
+        />
+        <p className="text-sm">
+          {copy.message}
+          <InitialWait key={waitUntil} retryAt={waitUntil} />
         </p>
-      ) : null}
-      <Button className="h-11" onClick={() => onAction(copy.action)}>
-        {LABEL[copy.action]}
-      </Button>
+      </div>
+      {copy.action === "retry" ? (
+        <RetryButton
+          key={waitUntil}
+          retryAt={waitUntil}
+          label={LABEL.retry}
+          onRetry={() => onAction("retry")}
+          className="h-11"
+        />
+      ) : (
+        <Button className="h-11" onClick={() => onAction(copy.action)}>
+          {LABEL[copy.action]}
+        </Button>
+      )}
     </div>
   );
 }

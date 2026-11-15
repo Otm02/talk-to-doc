@@ -87,7 +87,16 @@ async function readLines(res: Response): Promise<IngestLine[]> {
 async function expectError(res: Response, code: keyof typeof ERROR_CATALOG) {
   expect(res.status).toBe(ERROR_CATALOG[code].status);
   const body = await res.json();
-  expect(body.error).toEqual({ code, message: ERROR_CATALOG[code].message });
+  // 429s also carry retryAfterSec; the code and copy are what this checks.
+  expect(body.error).toMatchObject({
+    code,
+    message: ERROR_CATALOG[code].message,
+  });
+  expect(Object.keys(body.error).sort()).toEqual(
+    res.status === 429
+      ? ["code", "message", "retryAfterSec"]
+      : ["code", "message"],
+  );
   expect(typeof body.requestId).toBe("string");
 }
 

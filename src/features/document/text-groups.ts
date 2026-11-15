@@ -8,7 +8,7 @@ export interface TextUnit {
   id: string;
   text: string;
   /** Video only: the timestamp that links to that second on YouTube. */
-  stamp?: { label: string; href: string };
+  stamp?: { label: string; href: string; startSec: number };
 }
 
 export interface TextGroup {
@@ -50,6 +50,7 @@ export function buildGroups(doc: DocumentData): TextGroup[] {
       stamp: {
         label: formatTimestamp(seg.startSec),
         href: timestampHref(videoId, seg.startSec),
+        startSec: seg.startSec,
       },
     });
   });

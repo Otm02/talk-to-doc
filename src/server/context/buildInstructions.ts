@@ -94,10 +94,17 @@ function coverageSentence(coverage: number): string {
   return `only the first ${percent}% of the text, because the rest was cut to fit`;
 }
 
+// The chat turns "page 12" and "[04:05]" in an answer into chips that open
+// the text at that spot (src/features/document/references.ts). The parser
+// only knows these two forms, so the model is told to use exactly them, in
+// whatever language it answers: a reply in French still says "page 12". In
+// speech the brackets would be read out, so the model is asked to say the
+// time naturally; whether a spoken reply's transcript keeps the bracketed
+// form is not guaranteed, and a chip only appears when it does.
 function markerRule(source: InstructionSource): string {
   return source === "pdf"
-    ? `Each page starts with a marker like "--- Page 3 ---". Mention page numbers when they help the user find something, said naturally ("on page 3").`
-    : `Each paragraph starts with a timestamp like "[02:35]". Mention timestamps when they help the user find something, said naturally ("around two thirty-five").`;
+    ? `Each page starts with a marker like "--- Page 3 ---". When you point to a place in the document, name the page exactly as "page 12", or "pages 3 to 4" for a range: the word "page" and the page numbers in digits. Use this exact form in every language you reply in, and only name pages that appear in the reference material.`
+    : `Each paragraph starts with a timestamp like "[02:35]". When you point to a moment in the video, write the timestamp exactly as it appears, in square brackets, like "[04:05]". Use this exact written form in every language you reply in, and only give timestamps that appear in the reference material. When you say it aloud, say the time naturally, like "four oh five", and never read the square brackets out.`;
 }
 
 function buildRules(doc: InstructionDocument, hasHistory: boolean): string {

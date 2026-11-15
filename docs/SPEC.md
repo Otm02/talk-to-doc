@@ -24,14 +24,16 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 | FR-ING-06 | Extracted text is shown in a collapsible preview | The document screen has a collapsible full-text panel with page or timestamp markers. Pages render as they stream in | `src/features/document/text-preview.test.tsx`, `e2e/ingest-pdf.spec.ts` | M4 |
 | FR-CTX-01 | Extracted text becomes context for the Realtime session | The server builds session instructions from DocumentStore (never from client-sent text), fences them as untrusted, and mints the client secret with them already in place | `src/server/context/build-instructions.test.ts`, `src/server/session/service.test.ts` | M5 |
 | FR-CTX-02 | No chunking, summarizing or citations needed | Out of scope. The only reduction is the `CONTEXT_TOKEN_BUDGET` cap, with a visible coverage notice | `src/server/context/budget.test.ts` | M5 |
-| FR-VOICE-01 | A **Start Voice Chat** button opens a live Realtime session | The button runs mic permission, then `POST /api/realtime/session`, then the WebRTC connect, with visible state at each step | `src/features/voice/realtime/use-realtime-session.test.ts`, `e2e/voice.spec.ts` | M6, M7 |
+| FR-VOICE-01 | A **Start Voice Chat** button opens a live Realtime session | The button runs mic permission, then `POST /api/realtime/session`, then the WebRTC connect, with visible state at each step | `src/features/voice/realtime/session.test.ts`, `src/features/voice/realtime/use-voice-session.test.tsx`, `e2e/voice.spec.ts` | M6, M7 |
 | FR-VOICE-02 | User asks by voice and hears spoken answers in real time | Mic track goes up, the remote audio track plays. `semantic_vad` with `interrupt_response: true` enables barge-in | `src/features/voice/realtime/reducer.test.ts`, MC-3 | M6, M7 |
 | FR-VOICE-03 | Live text transcript of the conversation | Reducer merges `conversation.item.input_audio_transcription.*` and `response.output_audio_transcript.*`, ordered by `previous_item_id`. Rendered in an `aria-live="polite"` log | `reducer.test.ts`, `src/features/voice/ui/transcript.test.tsx` | M6, M7 |
-| FR-VOICE-04 | Text chat fallback when no microphone is available | Mic denied, missing or busy switches to text mode on the same Realtime session (recvonly audio or a silent track). Text mode can also be chosen by hand | `use-realtime-session.test.ts`, `e2e/text-mode.spec.ts` (WebKit, no fake mic) | M6, M7 |
-| FR-UI-01 | Simple mobile-first layout for ~390 px screens | Designed at 390x844. `dvh` units, safe-area insets, 44 px tap targets | `e2e/layout.spec.ts` (screenshots + axe), MC-4 | M8 |
-| FR-UI-02 | Clear mic and session controls (start, stop, mute) | Control bar: Start, End, Mute/Unmute, Stop speaking (interrupt), Type instead | `src/features/voice/ui/controls.test.tsx`, `e2e/voice.spec.ts` | M7 |
-| FR-UI-03 | Visible connection status and conversation flow | Status pill driven by the state machine (connecting, listening, thinking, speaking, reconnecting…), a mic level meter, and speaker labels in the transcript | `status-pill.test.tsx`, `e2e/voice.spec.ts` | M7 |
-| FR-UI-04 | Intuitive and responsive across mobile devices | Every async action has idle, working, success and error-with-retry states (section 3). Reduced motion respected | `e2e/states.spec.ts`, MC-4 | M4, M7, M8 |
+| FR-VOICE-04 | Text chat fallback when no microphone is available | Mic denied, missing or busy switches to text mode on the same Realtime session (a sendrecv audio line with an empty sender, so a mic can be attached later without a new session). Text mode can also be chosen by hand | `session.test.ts`, `webrtc-transport.test.ts`, `e2e/voice.spec.ts` | M6, M7, M8 |
+| FR-UI-01 | Simple mobile-first layout for ~390 px screens | Designed at 390x844, checked at 360x780 and 430x932. The chat is sized from `visualViewport` (`--vvh`), safe-area insets, 44 px tap targets, and a compact layout when the keyboard is up (section 3.3) | `e2e/layout.spec.ts` (axe, overflow and tap targets at three sizes and in dark mode), `e2e/voice.spec.ts` (390x420), `use-compact-layout.test.tsx`, MC-4 | M8 |
+| FR-UI-02 | Clear mic and session controls (start, stop, mute) | Control bar: Start, End, Mute/Unmute, Stop speaking (interrupt), Type instead | `src/features/voice/ui/control-bar.test.tsx`, `src/features/voice/ui/composer.test.tsx`, `e2e/voice.spec.ts` | M7 |
+| FR-UI-03 | Visible connection status and conversation flow | Status pill driven by the state machine (connecting, listening, thinking, speaking, reconnecting…), a mic level meter, and speaker labels in the transcript | `src/features/voice/ui/status-map.test.ts`, `src/features/voice/ui/conversation-screen.test.tsx`, `e2e/voice.spec.ts` | M7 |
+| FR-UI-04 | Intuitive and responsive across mobile devices | Every async action has idle, working, success and error-with-retry states (section 3). Reduced motion respected | `e2e/layout.spec.ts`, `e2e/voice.spec.ts`, `src/features/voice/ui/level-dot.test.tsx`, MC-4 | M4, M7, M8 |
+| EX-01 | Extra, not in the brief: grounding chips | "page 12", "pages 3 to 4", "p. 7", "[mm:ss]" and "[h:mm:ss]" in an answer become chips that open the full text at that page or paragraph, with a brief highlight. Only targets that exist in the document become chips. This is navigation on what the model said, not a citation system: nothing is retrieved or verified | `src/features/document/references.test.ts`, `text-preview.test.tsx`, `e2e/voice.spec.ts` | M8 |
+| EX-02 | Extra, not in the brief: transcript export | Copy and Download in the chat's overflow menu and on the ended screen: Markdown with the title, source (file name or URL), date and model, then each turn as **You:** / **Assistant:**, interrupted replies marked. File name `<title-slug>-<YYYY-MM-DD>.md`. Copy falls back to a selection copy, then to a message pointing at Download | `src/features/voice/export/*.test.ts`, `e2e/voice.spec.ts` | M8 |
 | FR-SEC-01 | API keys never reach the client | Secrets are read only in `src/server/env.ts`; no `NEXT_PUBLIC_` secrets; `server-only` imports; lint rule against client imports of `src/server`; build output grep in CI | `src/server/env.test.ts`, CI step `scripts/check-bundle-secrets.ts` | M1, M10 |
 | FR-SEC-02 | Realtime connects only with ephemeral tokens or authenticated backend routes | `POST /v1/realtime/client_secrets` on the server, 60 s TTL. The browser receives only `value` and `expires_at` | `src/server/realtime/client-secrets.test.ts`, `src/app/api/realtime/session/route.test.ts` | M5 |
 | FR-DOC-01 | README has setup and run steps | README: prerequisites, `pnpm i`, `.env.local` from `.env.example`, `pnpm dev`, tests | README review (MC-9) | M1, M13 |
@@ -74,7 +76,7 @@ Proof column: a test file (unit `*.test.ts` next to the code, e2e under `e2e/`) 
 
 | ID | Rubric area | Top-score behavior we commit to | Proof | Milestone |
 |---|---|---|---|---|
-| RUB-1 | Product polish (mobile) | Every async action has four visible states. Exact copy for every error (section 4). Safe areas, dvh units, keyboard-aware composer, reduced motion, 44 px targets, aria-live transcript | `e2e/states.spec.ts`, `e2e/layout.spec.ts`, MC-4 | M4, M7, M8 |
+| RUB-1 | Product polish (mobile) | Every async action has four visible states. Exact copy for every error (section 4). Safe areas, dvh units, keyboard-aware composer, reduced motion, 44 px targets, aria-live transcript | `e2e/layout.spec.ts`, `e2e/voice.spec.ts`, `src/features/voice/ui/level-dot.test.tsx`, MC-4 | M4, M7, M8 |
 | RUB-2 | Ingestion quality | Every PDF and YouTube edge case in section 5 has a defined behavior and a test. Ligatures and hyphenation fixed, non-Latin text kept, scanned PDFs detected | `src/server/ingest/pdf/*.test.ts`, `src/server/youtube/*.test.ts` | M2, M3 |
 | RUB-3 | Code quality | TS strict, no `any`, zod at every boundary, discriminated unions with exhaustive switches, small modules, tests next to code, comments that explain why | `pnpm check`, reviewer report | all |
 | RUB-4 | System design | Thin routes over services; three state adapters chosen by env; every external call behind an adapter with a timeout and typed errors; a pure realtime reducer behind a transport interface | ARCHITECTURE.md, contract tests | M1, M5, M6, M10 |
@@ -137,8 +139,24 @@ Global layout at 390x844: one column, `min-height: 100dvh`, `env(safe-area-inset
 | reconnecting | "Reconnecting… (attempt 2 of 3)" (amber) | transcript stays visible, input disabled | End |
 | ending | "Ending…" | — | — |
 | ended | "Chat ended" | reason line (see section 4), transcript kept | **Start again**, Type instead |
-| error | red pill "Not connected" | error card with exact copy | Retry (when retryable), Type instead (when the cause is the mic) |
+| error | pill says why (see below) | error card with exact copy | Retry, counted down when the server gave a wait; Type instead (when the cause is the mic) |
 | time warning | toast "1 minute left in this chat." at 9:00 | — | — |
+
+**Why a chat is not running (the pill in the error state).** "Offline" is only for the network; a server that answered is never called offline.
+
+| Cause | Pill |
+|---|---|
+| The per-IP 429 (`rate_limited`) | Cooldown |
+| The daily cap (`daily_limit`) | Daily limit reached |
+| `navigator.onLine` is false, or a request got no answer (`session_network_failed`) | Offline |
+| The kill switch or the budget (`voice_disabled`, `budget_exhausted`) | Unavailable |
+| Anything else, including a connection that dropped while the device is online (`session_reconnect_failed`) | Not connected |
+
+Every 429 carries its wait twice: the `Retry-After` header and `error.retryAfterSec` in the JSON body (for `daily_limit`, the seconds until UTC midnight). The retry button reads "Try again in 42s" (or "8m 58s", "7h 12m"), counts down from a deadline so it cannot drift, and re-enables itself at 0. Screen readers hear the wait once when it starts and once when it ends, not on every tick. Ingestion 429s use the same button.
+
+**Two layouts.** A voice chat with nothing open is roomy: header (title, timer, **Text**, overflow menu), status pill, orb, transcript, a 56 px control bar (Mute, Stop answer, Keyboard, End). The chat turns compact when the composer is open, when `visualViewport.height` falls under 75% of the full height (soft keyboard), or in text mode. Compact means: one 44 px header (title, status pill, overflow menu; the timer shows only in the last minute), the orb reduced to a level dot inside the pill, no debug strip (it moves into the overflow menu), and the controls folded into the composer row (mic toggle, Send or Stop, End). The mic notice and the time warning sit inside the transcript's scroll area. The screen's height is `--vvh`, written from `visualViewport` on resize and scroll, and the viewport meta sets `interactive-widget=resizes-content`. Target, tested at 390x420: the transcript gets at least 70% of the visible height.
+
+**Overflow menu** (a bottom sheet): Show full text, Copy transcript, Download transcript, Hide keyboard (voice chat with the composer open), and the dev cost and events with `?debug=1`.
 
 Transcript: newest at the bottom, auto-scrolls unless the user scrolled up, then shows **Jump to latest**. User and assistant bubbles are labeled "You" and "Assistant". An interrupted answer ends with "(interrupted)".
 
@@ -146,7 +164,7 @@ Transcript: newest at the bottom, auto-scrolls unless the user scrolled up, then
 
 | State | UI |
 |---|---|
-| ready | Composer pinned above the keyboard (`visualViewport` resize), placeholder "Ask about this document" |
+| ready | Composer row on the bottom edge of the visible area (`--vvh`), placeholder "Ask a question". The row also holds the mic button ("Turn on microphone") and End |
 | sending | Send button shows a spinner; the user bubble appears at once |
 | streaming | Assistant bubble fills from `response.output_text.delta` |
 | done | Composer re-enabled |
@@ -198,10 +216,11 @@ Private videos map to `youtube_unavailable` because neither YouTube's player res
 
 | code | HTTP | Copy | Retry action |
 |---|---|---|---|
-| `mic_denied` | — | Microphone access is off. You can type instead, or allow the mic in your browser settings. | Type instead (auto) |
-| `mic_not_found` | — | No microphone found. You can type your questions instead. | Type instead (auto) |
-| `mic_in_use` | — | Your microphone is busy in another app. Close it and try again, or type instead. | Try again / Type instead |
-| `mic_unavailable` | — | The microphone isn't available here. You can type your questions instead. | Type instead (auto) |
+| `mic_denied` | — | Microphone access is off. You can type instead, or allow the mic in your browser settings. | Type instead (auto); Try microphone again + coach |
+| `mic_not_found` | — | No microphone found. You can type your questions instead. | Type instead (auto); Try microphone again + coach |
+| `mic_in_use` | — | Your microphone is busy in another app. Close it and try again, or type instead. | Type instead (auto); Try microphone again + coach |
+| `mic_unavailable` | — | The microphone isn't available here. You can type your questions instead. | Type instead (auto); Try microphone again |
+| `session_network_failed` | — | You're offline or the network dropped. Check your connection and try again. | Try again |
 | `doc_not_found` | 404 | We couldn't find that document. Please add the source again. | Add the source again |
 | `session_connect_failed` | 502 | Couldn't connect to voice chat. Try again. | Try again |
 | `session_upstream_busy` | 503 | The voice service is busy. Try again in a moment. | Try again |
@@ -209,9 +228,13 @@ Private videos map to `youtube_unavailable` because neither YouTube's player res
 | `session_max_duration` | — | This chat reached its N-minute limit. Start a new one to keep going. (N is `MAX_SESSION_MINUTES`; the session response carries it as `maxSessionSeconds`.) | Start again |
 | `session_idle` | — | Chat ended after 2 minutes of silence. Start again when you're ready. | Start again |
 | `session_hidden` | — | Chat ended because the app was in the background. | Start again |
-| `rate_limited` | 429 | Too many tries. Wait a minute and try again. | Try again (after `Retry-After`) |
+| `rate_limited` | 429 | Too many tries. Try again when the timer ends. | Try again (after `Retry-After`) |
 | `invalid_request` | 400 | Something was wrong with that request. Reload and try again. | Reload |
 | `internal` | 500 | Something went wrong on our side. Try again. | Try again |
+
+**Try microphone again never restarts the chat.** A tap runs, in this order: (1) `navigator.permissions.query({ name: "microphone" })`, inside a try because some browsers do not support it; if it says `denied`, show the coach and stop; (2) `getUserMedia`; on `NotAllowedError`, `NotFoundError` or `NotReadableError`, show the reason and the coach and stop; (3) only with a stream in hand, `sender.replaceTrack(micTrack)` on the connection the text chat already has: no renegotiation, no new client secret. If the track cannot be swapped in, the chat reconnects exactly once with one fresh secret, reusing the stream. Steps 1 and 2 make no request, so a button that cannot work costs nothing. The button stays visible and enabled throughout, taps under a second apart count once, and a chat mints one secret however long it stays in text mode.
+
+**The coach** is the taps that fix it, in order: the lock or tune icon left of the address bar, Permissions, Microphone to Allow, then come back and tap Try microphone again (reload only if the browser prompts for it, because a reload loses the document and the chat); then, if it is already allowed, Android Settings, Apps, Chrome or Samsung Internet, Permissions, Microphone. The first line names the tune icon for Chrome and the lock icon for Samsung Internet (from the user agent); iOS gets its own steps. It opens by itself after a retry that found no mic.
 
 ### 4.3 Budget guards
 
@@ -220,7 +243,7 @@ Text mode and voice share these guards. Ingestion and the preview never depend o
 | code | HTTP | Copy | Trips when |
 |---|---|---|---|
 | `voice_disabled` | 503 | Voice is paused right now; the extracted text still works. | `VOICE_ENABLED=false` (kill switch) |
-| `rate_limited` | 429 | Too many tries. Wait a minute and try again. | Per-IP mint limit hit (5 per 10 min); `Retry-After` carries the real wait |
+| `rate_limited` | 429 | Too many tries. Try again when the timer ends. | Per-IP mint limit hit (15 per 10 min); `Retry-After` and `error.retryAfterSec` carry the real wait |
 | `daily_limit` | 429 | The demo's voice sessions for today are used up. | Today's session starts are at or over `DAILY_SESSION_CAP` (UTC day) |
 | `budget_exhausted` | 503 | The demo's API budget is used up; the extracted text still works. | OpenAI returns `credit_balance_exhausted`, `project_spend_limit_exceeded`, `organization_spend_limit_exceeded`, `organization_usage_limit_exceeded` or `insufficient_quota` (never retried; nothing is latched, the next mint simply tries again) |
 
@@ -277,7 +300,7 @@ Terminal errors (unavailable, age-restricted, live, no transcript, too long) sto
 - **Budget.** `CONTEXT_TOKEN_BUDGET` applies to the document text only: 8,000 while building, 20,000 in production. Counted with `gpt-tokenizer` (o200k_base, the closest public encoding; Realtime counts may drift by a few percent). Instructions, conversation history and output share the 128k window, so 20k leaves room for a 10-minute chat.
 - **Truncation.** Whole pages (PDF) or whole 5-minute sections (YouTube) are included in order until the next one would exceed the budget. That last unit is cut at a token boundary and ends with `[…truncated]`. No summarizing, no chunk selection.
 - **How truncation is shown.** The session response carries `coverage { unitsIncluded, unitsTotal, tokensIncluded, tokensTotal, lastMarker }`, and the document screen shows the notice from section 3.2 before the chat starts. The preview always shows the full text.
-- **Markers.** PDF: `[Page n]` before each page. YouTube: `[mm:ss]` (or `[h:mm:ss]`) at the start of each ~30 s paragraph of merged caption lines. The system rules tell the model to cite markers when asked where something is, which helps without being a citation system.
+- **Markers.** PDF: `[Page n]` before each page. YouTube: `[mm:ss]` (or `[h:mm:ss]`) at the start of each ~30 s paragraph of merged caption lines. The system rules tell the model to name places in exactly two forms, in any reply language: "page 12" (or "pages 3 to 4") and the bracketed timestamp as it appears, "[04:05]". The chat turns those into chips that open the full text there (EX-01). It helps without being a citation system.
 - **Prompt-injection fencing.** Instructions are built only on the server (`src/server/context/build-instructions.ts`) from DocumentStore content:
   ```
   <system rules: role, be brief and conversational, answer from the reference, say when the answer is not in it,
@@ -352,7 +375,7 @@ OpenAI enforces the hard $20 limit on the key, for the build, QA, the video and 
 | `REALTIME_MODEL` | mini / mini, then 2.1 at the end of M13 | model in the minted session | — |
 | `CONTEXT_TOKEN_BUDGET` | 8000 / 20000 | caps instruction size | coverage notice |
 | `VOICE_ENABLED` | true / true | kill switch, checked on every mint and by `/api/limits` | `voice_disabled` |
-| Per-IP mint limit | 5 per 10 min | sliding window; **fails closed** on limiter timeout | `rate_limited` |
+| Per-IP mint limit | 15 per 10 min | sliding window; **fails closed** on limiter timeout. Minting a secret costs nothing and phones behind one address share the bucket, so this only has to stop a loop; `DAILY_SESSION_CAP` and OpenAI's hard limit guard spend. (It was 5 until M8: a real phone used that up retrying its mic) | `rate_limited`, shown as "Cooldown" with a countdown |
 | `DAILY_SESSION_CAP` | 50 / 25 | daily fixed-window counter in RateLimiter, keyed by UTC date (memory locally, Upstash on Vercel); reconnects of the same session within 10 min do not count | `daily_limit` |
 | `MAX_SESSION_MINUTES` | 5 | client ends the chat; warning 1 min before | warning toast, then `session_max_duration` |
 | Idle hang-up | 120 s with no speech and no response | client ends the chat | `session_idle` |

@@ -1003,3 +1003,74 @@ describe("small actions", () => {
     expect(s.items["u1"]?.prev).toBeNull();
   });
 });
+
+describe("retrying the microphone", () => {
+  const textChat = (): RealtimeState =>
+    reducer(connected(), { type: "mode", mode: "text", micIssue: "denied" });
+
+  it("marks a retry as working and back, without churning identical states", () => {
+    const working = reducer(textChat(), {
+      type: "mic-retry",
+      status: "working",
+    });
+    expect(working.micRetry).toBe("working");
+    expect(reducer(working, { type: "mic-retry", status: "working" })).toBe(
+      working,
+    );
+    expect(
+      reducer(working, { type: "mic-retry", status: "idle" }).micRetry,
+    ).toBe("idle");
+  });
+
+  it("a failed retry shows its reason, frees the button and is counted", () => {
+    let s = reducer(textChat(), { type: "mic-retry", status: "working" });
+    s = reducer(s, { type: "mic-retry-failed", reason: "in_use" });
+    expect(s).toMatchObject({
+      mode: "text",
+      micIssue: "in_use",
+      micRetry: "idle",
+      micRetryFails: 1,
+    });
+    s = reducer(s, { type: "mic-retry-failed", reason: "denied" });
+    expect(s).toMatchObject({ micIssue: "denied", micRetryFails: 2 });
+    // The chat itself is untouched by any of it.
+    expect(s.connection).toEqual({ status: "connected" });
+  });
+
+  it("a working mic clears the count; a new mic problem keeps it", () => {
+    let s = reducer(textChat(), { type: "mic-retry-failed", reason: "denied" });
+    s = reducer(s, { type: "mode", mode: "text", micIssue: "unavailable" });
+    expect(s.micRetryFails).toBe(1);
+    s = reducer(s, { type: "mode", mode: "voice", micIssue: null });
+    expect(s).toMatchObject({
+      mode: "voice",
+      micIssue: null,
+      micRetryFails: 0,
+    });
+  });
+
+  it.each([
+    { status: "ended", reason: "user" },
+    { status: "failed", code: "session_reconnect_failed" },
+  ] as const)(
+    "a chat that is $status is no longer checking the mic",
+    (connection) => {
+      const working = reducer(textChat(), {
+        type: "mic-retry",
+        status: "working",
+      });
+      expect(
+        reducer(working, { type: "connection", connection }).micRetry,
+      ).toBe("idle");
+    },
+  );
+
+  it("starts every chat with no retry in progress and none failed", () => {
+    expect(initialState).toMatchObject({ micRetry: "idle", micRetryFails: 0 });
+    const s = reducer(textChat(), {
+      type: "mic-retry-failed",
+      reason: "denied",
+    });
+    expect(reducer(s, { type: "reset" })).toBe(initialState);
+  });
+});

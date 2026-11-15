@@ -106,14 +106,17 @@ describe("connecting", () => {
     expect(outcome.value).toBe("pending");
   });
 
-  it("sends a receive-only audio line instead of a mic in text mode", async () => {
+  it("offers a sendrecv audio line with an empty sender in text mode", async () => {
     const { transport, pc } = setup();
     start(transport, null);
     await settle();
     expect(pc().tracksAdded).toEqual([]);
+    // sendrecv, not recvonly: a mic can be attached later without a new offer.
     expect(pc().transceivers).toEqual([
-      { kind: "audio", init: { direction: "recvonly" } },
+      { kind: "audio", init: { direction: "sendrecv" } },
     ]);
+    expect(pc().senders).toHaveLength(1);
+    expect(pc().senders[0]?.track).toBeNull();
   });
 
   it("is connected only after the channel is open AND session.created arrived", async () => {
@@ -285,7 +288,7 @@ describe("failing to connect", () => {
     expect(s.pc().closeCalls).toBe(1);
   });
 
-  it("maps a failure creating the offer to network", async () => {
+  it("maps a failure creating the offer to rejected, not to a network outage", async () => {
     const fake = new FakePeerConnection();
     fake.offerError = new Error("boom");
     const transport = new WebRtcTransport({
@@ -295,8 +298,21 @@ describe("failing to connect", () => {
     });
     const { outcome } = start(transport);
     await settle();
-    expect(outcome.value).toMatchObject({ kind: "network" });
+    expect(outcome.value).toMatchObject({ kind: "rejected" });
     expect(fake.closeCalls).toBe(1);
+  });
+
+  it("maps a rejected SDP answer to rejected, not to a network outage", async () => {
+    const fake = new FakePeerConnection();
+    fake.setRemoteError = new Error("bad sdp");
+    const transport = new WebRtcTransport({
+      audioElement: fakeAudioElement(),
+      createPeerConnection: () => asPc(fake),
+      fetch: sdpFetch() as unknown as typeof fetch,
+    });
+    const { outcome } = start(transport);
+    await settle();
+    expect(outcome.value).toMatchObject({ kind: "rejected" });
   });
 
   it("fails when ICE fails before the session is up", async () => {
@@ -310,13 +326,13 @@ describe("failing to connect", () => {
     expect(pc().closeCalls).toBe(1);
   });
 
-  it("fails when the channel closes before the session is up", async () => {
+  it("fails as rejected when the channel closes before the session is up", async () => {
     const { transport, channel } = setup();
     const { outcome } = start(transport);
     await settle();
     channel().remoteClose();
     await settle();
-    expect(outcome.value).toMatchObject({ kind: "network" });
+    expect(outcome.value).toMatchObject({ kind: "rejected" });
   });
 
   it("times out after 15 s with nothing answering, and cleans up", async () => {
@@ -515,5 +531,87 @@ describe("once connected", () => {
     await settle();
     s.transport.close();
     expect(mic.tracks[0]?.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("adding the microphone to a live connection", () => {
+  async function connected(micStream: MediaStream | null = null) {
+    const ctx = setup();
+    const { outcome } = start(ctx.transport, micStream);
+    await settle();
+    ctx.channel().open();
+    ctx.channel().message(CREATED);
+    await settle();
+    expect(outcome.value).toBe("ok");
+    return ctx;
+  }
+
+  it("swaps the track into the existing sender: no new offer, no request, no new connection", async () => {
+    const { transport, pc, fetchImpl } = await connected(null);
+    const mic = new FakeStream();
+    const offers = pc().createOffer.mock.calls.length;
+
+    await expect(transport.upgradeMic(asStream(mic))).resolves.toBe(true);
+
+    expect(pc().senders[0]?.replaceTrack).toHaveBeenCalledExactlyOnceWith(
+      mic.tracks[0],
+    );
+    expect(pc().senders[0]?.track).toBe(mic.tracks[0]);
+    // Nothing was renegotiated and nothing went over HTTP: the one fetch is
+    // the SDP exchange from connect(), made with the chat's only secret.
+    expect(pc().createOffer.mock.calls.length).toBe(offers);
+    expect(pc().log.filter((c) => c === "setRemoteDescription")).toHaveLength(
+      1,
+    );
+    expect(pc().log.at(-1)).toBe("replaceTrack");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(FakePeerConnection.instances).toHaveLength(1);
+    expect(pc().closeCalls).toBe(0);
+  });
+
+  it("replaces the mic of a voice chat the same way", async () => {
+    const first = new FakeStream();
+    const { transport, pc } = await connected(asStream(first));
+    const second = new FakeStream();
+    await expect(transport.upgradeMic(asStream(second))).resolves.toBe(true);
+    expect(pc().senders[0]?.track).toBe(second.tracks[0]);
+  });
+
+  it("says no, without throwing, when the browser refuses the track", async () => {
+    const { transport, pc } = await connected(null);
+    const sender = pc().senders[0];
+    if (!sender) throw new Error("no sender");
+    sender.replaceError = new Error("InvalidModificationError");
+    await expect(
+      transport.upgradeMic(asStream(new FakeStream())),
+    ).resolves.toBe(false);
+    expect(sender.track).toBeNull();
+  });
+
+  it("says no for a stream without an audio track", async () => {
+    const { transport, pc } = await connected(null);
+    await expect(
+      transport.upgradeMic(asStream(new FakeStream([]))),
+    ).resolves.toBe(false);
+    expect(pc().senders[0]?.replaceTrack).not.toHaveBeenCalled();
+  });
+
+  it("says no before it is connected and after it is closed", async () => {
+    const { transport, pc, channel } = setup();
+    const mic = asStream(new FakeStream());
+    await expect(transport.upgradeMic(mic)).resolves.toBe(false);
+
+    const { promise } = start(transport);
+    await settle();
+    // Negotiating: there is a sender, but the link is not up yet.
+    await expect(transport.upgradeMic(mic)).resolves.toBe(false);
+    channel().open();
+    channel().message(CREATED);
+    await promise;
+    const sender = pc().senders[0];
+
+    transport.close();
+    await expect(transport.upgradeMic(mic)).resolves.toBe(false);
+    expect(sender?.replaceTrack).not.toHaveBeenCalled();
   });
 });

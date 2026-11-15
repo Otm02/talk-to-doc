@@ -1,7 +1,24 @@
-import { describe } from "vitest";
+import { describe, expect, it } from "vitest";
 import { runStateContract, type Harness } from "./contract";
 import { createMemoryAdapters } from "./memory";
+import { secondsUntilNextUtcDay } from "./types";
 import { createUpstashAdapters, createUpstashRedis } from "./upstash";
+
+describe("secondsUntilNextUtcDay", () => {
+  it("counts down to the next UTC midnight and is never 0", () => {
+    expect(secondsUntilNextUtcDay(Date.UTC(2026, 10, 14, 23, 59, 18))).toBe(42);
+    expect(secondsUntilNextUtcDay(Date.UTC(2026, 10, 14, 12, 0, 0))).toBe(
+      12 * 3600,
+    );
+    // Exactly midnight is the start of a full day, not "now".
+    expect(secondsUntilNextUtcDay(Date.UTC(2026, 10, 15, 0, 0, 0))).toBe(
+      86_400,
+    );
+    expect(
+      secondsUntilNextUtcDay(Date.UTC(2026, 10, 14, 23, 59, 59, 900)),
+    ).toBe(1);
+  });
+});
 
 runStateContract("memory", (): Harness => {
   let now = Date.UTC(2026, 10, 9, 12, 0, 0);

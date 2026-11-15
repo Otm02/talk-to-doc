@@ -1,4 +1,5 @@
 import { z } from "zod";
+import "@/lib/zod-jitless";
 
 // Server events we handle, from docs/reference/openai-realtime.md section 3
 // (GA names only). Schemas declare just the fields the
