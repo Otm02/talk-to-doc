@@ -169,9 +169,8 @@ describe("runSmoke", () => {
 
 describe("parseArgs", () => {
   it("smokes the sample video, so the 24 h transcript cache absorbs it", async () => {
-    const { SAMPLE_VIDEO_URL } = await import(
-      "../src/features/ingest/sample-chips"
-    );
+    const { SAMPLE_VIDEO_URL } =
+      await import("../src/features/ingest/sample-chips");
     const id = (u: string) => /(?:v=|youtu\.be\/)([\w-]{11})/.exec(u)?.[1];
     expect(id(DEFAULT_YOUTUBE)).toBeDefined();
     expect(id(DEFAULT_YOUTUBE)).toBe(id(SAMPLE_VIDEO_URL));

@@ -247,8 +247,8 @@ test.describe("conversation screen on the mock transport", () => {
     // An inert button cannot take focus, whatever tries to give it any.
     await start.evaluate((el) => (el as HTMLElement).focus());
     expect(
-      await page.evaluate(
-        () => document.activeElement?.textContent?.includes("Start voice"),
+      await page.evaluate(() =>
+        document.activeElement?.textContent?.includes("Start voice"),
       ),
     ).toBe(false);
     expect(

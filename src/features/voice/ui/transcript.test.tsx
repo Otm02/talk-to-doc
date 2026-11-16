@@ -224,9 +224,7 @@ describe("Transcript: the soft keyboard resizes the scroll area", () => {
     size.client = 180; // keyboard opens
     fire();
     expect(scroller.scrollTop).toBe(1000);
-    expect(
-      screen.queryByRole("button", { name: "Jump to latest" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
   });
 
   it("re-pins a reader who was within a short distance of the end", () => {

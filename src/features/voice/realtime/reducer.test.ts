@@ -872,11 +872,14 @@ describe("connection", () => {
       type: "notice",
       notice: { kind: "cap_warning", secondsLeft: 60 },
     });
-    expect(to(warned, { status: "ended", reason: "max_duration" }).notice).toBeNull();
+    expect(
+      to(warned, { status: "ended", reason: "max_duration" }).notice,
+    ).toBeNull();
     const errored = play([ev.error("invalid_value")], connected());
     expect(errored.notice).toEqual({ kind: "error", code: "invalid_value" });
     expect(
-      to(errored, { status: "failed", code: "session_reconnect_failed" }).notice,
+      to(errored, { status: "failed", code: "session_reconnect_failed" })
+        .notice,
     ).toBeNull();
   });
 

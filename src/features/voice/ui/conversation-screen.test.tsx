@@ -174,9 +174,7 @@ describe("ConversationScreen", () => {
       await settle();
       fireEvent.click(screen.getByRole("button", { name: /Show full text/i }));
       await settle();
-      expect(
-        screen.getByRole("button", { name: "Copy" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
 
       await pressBack();
       expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
@@ -658,7 +656,9 @@ describe("ConversationScreen", () => {
       expect(chips[0]).toHaveAccessibleName("page 2, open in the full text");
 
       fireEvent.click(chips[1] as HTMLElement);
-      const dialog = await found(() => screen.getByRole("dialog", { name: "Full text" }));
+      const dialog = await found(() =>
+        screen.getByRole("dialog", { name: "Full text" }),
+      );
       const page3 = within(dialog).getByRole("region", { name: "Page 3" });
       expect(page3).toHaveAttribute("data-highlight", "true");
       expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({

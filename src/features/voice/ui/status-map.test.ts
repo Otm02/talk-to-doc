@@ -14,10 +14,7 @@ const failed = (code: FailureCode) =>
 
 describe("statusInfo", () => {
   it.each([
-    [
-      s({ connection: { status: "requestingMic" } }),
-      "Allow the microphone",
-    ],
+    [s({ connection: { status: "requestingMic" } }), "Allow the microphone"],
     [
       s({ connection: { status: "connecting", phase: "minting" } }),
       "Connecting",

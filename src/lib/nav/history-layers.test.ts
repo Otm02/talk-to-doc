@@ -11,8 +11,7 @@ function traverse(act: () => void): Promise<void> {
     act();
   });
 }
-const depth = () =>
-  (window.history.state as { ttd?: number } | null)?.ttd ?? 0;
+const depth = () => (window.history.state as { ttd?: number } | null)?.ttd ?? 0;
 const settle = () => new Promise<void>((r) => setTimeout(r, 20));
 
 beforeEach(() => {
