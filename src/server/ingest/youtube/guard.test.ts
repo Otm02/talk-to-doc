@@ -15,8 +15,8 @@ describe("createSupadataGuard", () => {
     expect(err).toMatchObject({ code: "PROVIDER_QUOTA" });
   });
 
-  it("keeps a 31-day month under Supadata's 100 free credits", () => {
-    expect(SUPADATA_DAILY_CAP * 31).toBeLessThan(100);
+  it("allows 15 lookups a day", () => {
+    expect(SUPADATA_DAILY_CAP).toBe(15);
   });
 
   it("starts again on the next UTC day", async () => {

@@ -89,7 +89,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - Files live in `src/server/ingest/youtube/` (the pure parser and timestamp helper in `src/lib/youtube/`, so the UI can share them). `TranscriptProvider.fetch` returns a transcript or throws a typed `TranscriptError`; there is no result union.
 - Added `UPSTREAM_FAILED` (maps to `youtube_failed`); the chain falls through on it, `BLOCKED` and `UPSTREAM_TIMEOUT`.
 - Dropped: `fixture.ts` (M4 adds it with the UI e2e), the 5-minute units, `SUPADATA_MONTHLY_CAP` and the 1 req/s limiter (CLAUDE.md: the app keeps no accounting; the per-IP limit and the cache protect the credits), `YOUTUBE_PROVIDERS` (the Supadata key is the switch).
-- Transcript cache is 1 h (the M3 prompt), not 24 h. Supadata has no title or duration, so the title and channel come from oEmbed (best effort) and the duration from the last caption.
+- Transcript cache was 1 h in M3; it is 24 h now (fix-punch-list), and the Supadata daily cap is 15, not 3. Supadata has no title or duration, so the title and channel come from oEmbed (best effort) and the duration from the last caption.
 - Direct fast-fails after 3 s on Vercel when Supadata is configured.
 
 **Scope**

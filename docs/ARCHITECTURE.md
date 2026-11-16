@@ -108,7 +108,7 @@ Every handler follows the same shape: `parse(zodSchema)`, then one service call,
 | `GET /api/health` | — | `{ ok, version, uploadMode }` | health limit per IP (120/min) |
 | `POST /api/upload/token` | `generate-client-token` event only | Blob token JSON | token limit per IP (20/hour) and a global 150 a day (`rate_limited` until UTC midnight) |
 | `POST /api/ingest/pdf` | `{ blobUrl, fileName? }` (blob) or multipart `file` (direct) | NDJSON | ingest limit per IP (10/min) |
-| `POST /api/ingest/youtube` | `{ url, lang? }` | NDJSON | ingest limit; Supadata guard (3 lookups per UTC day, `youtube_quota`) |
+| `POST /api/ingest/youtube` | `{ url, lang? }` | NDJSON | ingest limit; Supadata guard (15 lookups per UTC day, `youtube_quota`) |
 | `POST /api/realtime/session` | `{ documentId, history?: [{ role: "user" \| "assistant", text }] }` | `{ clientSecret, expiresAt, model }` (`expiresAt` is unix seconds, as OpenAI sends it) | `VOICE_ENABLED`, per-IP limit (15 per 10 min; a 429 carries `Retry-After` and `error.retryAfterSec`), `DAILY_SESSION_CAP` (counted only after a successful mint); OpenAI quota or billing error → 503 `budget_exhausted` |
 | `GET /api/cron/cleanup` | header `Authorization: Bearer CRON_SECRET` | `{ deleted }` | Vercel cron only (daily, `vercel.json`); cron limit per IP (5/min) before the secret is checked; deletes `uploads/*.pdf` older than 1 h |
 
