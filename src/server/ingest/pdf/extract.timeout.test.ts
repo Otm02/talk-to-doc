@@ -106,6 +106,19 @@ describe("extraction deadline", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
+  it("times out if getMeta stalls during openPdf and frees the parser and slot", async () => {
+    const { destroy } = fakePdf();
+    unpdf.getMeta.mockImplementation(never);
+    const opening = openPdf(bytes, Date.now() + 5000);
+    const assertion = expect(opening).rejects.toMatchObject({
+      code: "pdf_timeout",
+    });
+    await vi.advanceTimersByTimeAsync(5001);
+    await assertion;
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(extractionSlots.active).toBe(0);
+  });
+
   it("refuses at once when the deadline has already passed", async () => {
     const { pdf } = fakePdf();
     const doc = await openPdf(bytes, Date.now() + 1000);

@@ -184,7 +184,7 @@ export async function openPdf(
 
     if (pdf.numPages > MAX_PDF_PAGES) throw catalogError("pdf_too_many_pages");
 
-    const title = await readTitle(pdf);
+    const title = await readTitle(pdf, deadline);
     return {
       numPages: pdf.numPages,
       title,
@@ -216,11 +216,13 @@ export async function openPdf(
 
 async function readTitle(
   pdf: Awaited<ReturnType<typeof getDocumentProxy>>,
+  deadline: number,
 ): Promise<string | undefined> {
   try {
-    const { info } = await getMeta(pdf);
+    const { info } = await raceDeadline(getMeta(pdf), deadline);
     return typeof info.Title === "string" ? info.Title : undefined;
-  } catch {
+  } catch (err) {
+    if (err instanceof AppError) throw err;
     return undefined; // a bad Info dictionary should not fail the whole upload
   }
 }
