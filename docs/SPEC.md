@@ -134,10 +134,10 @@ Global layout at 390x844: one column, `min-height: 100dvh`, `env(safe-area-inset
 | validating (client) | Instant. Bad input shows inline field error copy from section 4 | — |
 | uploading (PDF, blob mode) | File name, size, progress bar with %, "Uploading…" | **Cancel** |
 | extracting | "Reading page 37 of 120…" (PDF) or "Fetching captions…" then "Reading 1 h 12 min of captions…" (YouTube). Pages appear in the preview below as they stream | **Cancel** |
-| success | Navigates to `/d/[id]` | — |
+| success | The same screen turns into the ready document (3.2); the address does not change | — |
 | error | Inline error card with the exact copy and a retry action that matches the error (retry upload, choose another file, try another link) | **Try again** / **Choose another file** |
 
-### 3.2 Document ready (`/d/[id]`)
+### 3.2 Document ready (the same page, `/`)
 
 | Element | Content |
 |---|---|
@@ -204,7 +204,18 @@ Transcript: newest at the bottom, auto-scrolls unless the user scrolled up, then
 
 Text mode uses the same Realtime session with `output_modalities: ["text"]` per response, so it shares guards and costs less.
 
-### 3.5 Global
+### 3.5 The Back button
+
+The app is one page at `/`. The server keeps only the extracted text under a short TTL and never hands a document back by id, so there is no route per document and no link to one. Back is handled in the browser instead: opening a sheet, the chat or the ready document pushes a history entry (`history.pushState`, the address stays `/`), and `popstate` closes the top layer. From the inside out:
+
+1. A sheet (full text, overflow menu, the End question) closes.
+2. A chat in progress asks "End this chat?" and says that ending goes back to the document and clears the conversation. **Keep talking** stays, and Back asks again. A chat that is over (ended, failed, never started) closes at once.
+3. The ready document returns to the source screen, the same as **Use another source**.
+4. From the source screen Back leaves the site, as the browser would.
+
+Closing a layer with its own button takes its history entry away, so Back never lands on a screen that is already gone. A reload starts from the source screen. Tests: `src/lib/nav/history-layers.test.ts`, `src/features/voice/ui/conversation-screen.test.tsx` ("the Back button"), `e2e/voice.spec.ts` ("the Back button walks out one layer at a time").
+
+### 3.6 Global
 
 - Offline banner (top, `role="status"`): "You're offline. We'll reconnect when you're back." It shows when `navigator.onLine` is false or a request got no answer, and goes at the first answer of any kind (a 429 is an answer). A load that failed for lack of an answer runs again once by itself when the connection returns.
 - Slow upload: with no progress for 20 s the upload card says "Connection is slow" with **Cancel** and **Keep waiting**. The percent shown is always the real one.
@@ -307,7 +318,7 @@ Each row has a fixture and a test. Fixtures live in `test/fixtures/` and are gen
 | Hyphenation at line ends | `-\n` followed by a lowercase letter | joined ("exam-\nple" → "example"); a hyphen before a capital or digit stays | `src/server/ingest/pdf/normalize.test.ts` |
 | Excess whitespace, null bytes, control chars | regex | collapsed / stripped; page breaks kept | `src/server/ingest/pdf/normalize.test.ts` |
 | Upload interrupted | `upload()` rejects / abort | `upload_failed`, Retry | `src/features/ingest/upload-client.test.ts`, `src/features/ingest/use-ingest.test.tsx`, `e2e/network.spec.ts` |
-| Ingest stream breaks mid-way | client sees no `done` line | what arrived stays on screen with "The connection dropped. You have N of M pages." and **Try again** / **Start over** (section 3.5); a YouTube stream is asked for again once, silently, first. **Try again** sends the work again: the upload was consumed when it was read, and no stored copy is served (an idempotency key was planned in M2 and not built) | `src/server/ingest/pdf/stream.test.ts` (error line after a partial stream), `src/features/ingest/upload-client.test.ts` (keeps the pages that arrived), `e2e/network.spec.ts` |
+| Ingest stream breaks mid-way | client sees no `done` line | what arrived stays on screen with "The connection dropped. You have N of M pages." and **Try again** / **Start over** (section 3.6); a YouTube stream is asked for again once, silently, first. **Try again** sends the work again: the upload was consumed when it was read, and no stored copy is served (an idempotency key was planned in M2 and not built) | `src/server/ingest/pdf/stream.test.ts` (error line after a partial stream), `src/features/ingest/upload-client.test.ts` (keeps the pages that arrived), `e2e/network.spec.ts` |
 
 ### 5.2 YouTube
 

@@ -10,6 +10,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 import type { TranscriptExportApi } from "../export/use-transcript-export";
 import { ExportButtons } from "./export-buttons";
 
@@ -40,6 +41,7 @@ export function SessionMenu({
   debug?: ReactNode;
 }) {
   const close = () => onOpenChange(false);
+  useHistoryLayer(open, close);
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent

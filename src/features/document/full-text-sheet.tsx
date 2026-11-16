@@ -10,6 +10,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 import { copyText } from "@/features/voice/export/export-actions";
 import type { ReferenceTarget } from "./references";
 import {
@@ -51,6 +52,8 @@ export function FullTextSheet({
   complete,
   focus = null,
 }: Props) {
+  // The phone's Back closes the sheet instead of leaving the page.
+  useHistoryLayer(open, () => onOpenChange(false));
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent

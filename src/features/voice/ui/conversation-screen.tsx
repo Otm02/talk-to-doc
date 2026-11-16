@@ -49,6 +49,7 @@ import { StatusPill } from "./status-pill";
 import { Transcript } from "./transcript";
 import { useCompactLayout } from "./use-compact-layout";
 import { useOnline } from "@/lib/net/use-online";
+import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 
 export type VoiceSessionApi = ReturnType<typeof useVoiceSession>;
 
@@ -107,7 +108,9 @@ export function ConversationScreen({
     onStart(mode);
   };
   const [menuOpen, setMenuOpen] = useState(false);
-  const [confirmingEnd, setConfirmingEnd] = useState(false);
+  // "end": the End button. "leave": Back was pressed during a chat, so ending
+  // it also goes back to the document.
+  const [confirming, setConfirming] = useState<"end" | "leave" | null>(null);
   const [textOpen, setTextOpen] = useState(false);
   const [focus, setFocus] = useState<TextFocus | null>(null);
 
@@ -130,6 +133,17 @@ export function ConversationScreen({
   const c = state.connection;
   const live = isLive(state);
   const inProgress = isInProgress(state);
+
+  // Back leaves the chat for the document, but never drops a running chat
+  // without asking. A chat that is over, or never started, just closes.
+  useHistoryLayer(true, () => {
+    if (!inProgress) {
+      onClose();
+      return true;
+    }
+    setConfirming("leave");
+    return false;
+  });
   const connected = c.status === "connected";
   const textMode = state.mode === "text";
   const showComposer = inProgress && (textMode || typing);
@@ -392,7 +406,7 @@ export function ConversationScreen({
               type="button"
               aria-label="End"
               className="size-11 bg-destructive-solid text-white hover:bg-destructive-solid/90"
-              onClick={() => setConfirmingEnd(true)}
+              onClick={() => setConfirming("end")}
             >
               <PhoneOff aria-hidden />
             </Button>
@@ -415,9 +429,12 @@ export function ConversationScreen({
       )}
 
       <EndConfirm
-        open={confirmingEnd}
-        onOpenChange={setConfirmingEnd}
-        onEnd={onEnd}
+        open={confirming !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(null);
+        }}
+        leaving={confirming === "leave"}
+        onEnd={confirming === "leave" ? onClose : onEnd}
       />
       <SessionMenu
         open={menuOpen}

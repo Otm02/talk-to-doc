@@ -222,6 +222,56 @@ test.describe("conversation screen on the mock transport", () => {
       .toBe(true);
   });
 
+  test("the Back button walks out one layer at a time and never leaves the site early", async ({
+    page,
+  }) => {
+    await stubMic(page, "ok");
+    await openDoc(page, "mockRealtime=text-turn");
+    const startUrl = page.url();
+
+    // Full text sheet on the document card.
+    await page.getByRole("button", { name: "Show full text" }).click();
+    const copy = page.getByRole("button", { name: "Copy" });
+    await expect(copy).toBeVisible();
+    await page.goBack();
+    await expect(copy).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Start voice chat" }),
+    ).toBeVisible();
+
+    // A running chat asks first; Back on the question is "Keep talking".
+    await page.getByRole("button", { name: "Type instead" }).click();
+    await expect(page.getByTestId("composer")).toBeVisible();
+    await page.goBack();
+    await expect(page.getByText("End this chat?")).toBeVisible();
+    await page.goBack();
+    await expect(page.getByText("End this chat?")).toHaveCount(0);
+    await expect(page.getByTestId("conversation")).toBeVisible();
+
+    // The full text from inside the chat closes before the chat does.
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("button", { name: /Show full text/ }).click();
+    await expect(copy).toBeVisible();
+    await page.goBack();
+    await expect(copy).toHaveCount(0);
+    await expect(page.getByTestId("conversation")).toBeVisible();
+
+    // Leaving the chat: confirm, then the document card is back.
+    await page.goBack();
+    await page.getByRole("button", { name: "End chat" }).click();
+    await expect(page.getByTestId("conversation")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Start voice chat" }),
+    ).toBeVisible();
+
+    // From the document card, Back returns to the source screen, same site.
+    await page.goBack();
+    await expect(
+      page.getByRole("heading", { name: "Talk to a document" }),
+    ).toBeVisible();
+    expect(page.url()).toBe(startUrl);
+  });
+
   test("retrying a mic that is still blocked: no request, button stays, coach opens", async ({
     page,
   }) => {

@@ -26,14 +26,12 @@ The browser talks to OpenAI directly for media, using a 60 s client secret minte
 src/
   app/                              Next routes. Pages render features; route handlers stay thin.
     page.tsx                        ingest screen
-    d/[id]/page.tsx                 document + chat screen
     api/
       health/route.ts               GET  liveness, build sha, state driver (no secrets)
       limits/route.ts               GET  voice enabled? reason code if a guard is tripped (kill switch, daily cap)
       upload/token/route.ts         POST Blob client-upload token (handleUpload)
       ingest/pdf/route.ts           POST {blobUrl, fileName?} (blob) or multipart "file" (direct) → NDJSON
       ingest/youtube/route.ts       POST {url, lang?} → NDJSON
-      documents/[id]/route.ts       GET  stored document (meta + pages), for reload and retries
       session/route.ts              POST {documentId, history?} → client secret (history = the finished turns, on a reconnect)
       cron/cleanup/route.ts         GET  daily: delete orphan blobs (CRON_SECRET)
   features/                         client code, grouped by feature

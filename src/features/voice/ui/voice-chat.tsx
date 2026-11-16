@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 import { ReadyBar } from "@/features/document/ready-bar";
 import type { DocumentData } from "@/features/ingest/ingest-state";
 import type { Mode } from "../realtime/state";
@@ -37,6 +38,13 @@ export function VoiceChat({
   const active = isInProgress(state);
 
   useWakeLock(isLive(state));
+
+  // The ready document is one step in: Back returns to the source screen, like
+  // "Use another source". The chat above it is a layer of its own.
+  useHistoryLayer(true, () => {
+    onUseAnother();
+    return true;
+  });
 
   // Leaving the page mid-chat would drop the connection without asking.
   useEffect(() => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 import {
   Sheet,
   SheetContent,
@@ -13,11 +14,15 @@ export function EndConfirm({
   open,
   onOpenChange,
   onEnd,
+  leaving = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onEnd: () => void;
+  /** Asked because of Back: ending also leaves the chat. */
+  leaving?: boolean;
 }) {
+  useHistoryLayer(open, () => onOpenChange(false));
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -27,7 +32,9 @@ export function EndConfirm({
       >
         <SheetTitle>End this chat?</SheetTitle>
         <SheetDescription>
-          Your conversation stays on screen until you leave.
+          {leaving
+            ? "You will go back to the document, and this conversation is cleared."
+            : "Your conversation stays on screen until you leave."}
         </SheetDescription>
         <Button
           className="h-14 bg-destructive-solid text-white hover:bg-destructive-solid/90"
