@@ -308,7 +308,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 **Scope**
 - CI e2e on Chromium and WebKit at 390x844 with the mock transport and fixture providers; sharded if needed; traces and screenshots uploaded on failure.
 - Coverage thresholds (as built, in `vitest.config.mts`): 80% overall, and 90% on lines, statements, functions and branches for `src/server/**` and `src/features/voice/realtime/**`. Only the Next `layout.tsx`/`page.tsx` and the generated `src/components/ui` are left out of the count.
-- One `@live` Playwright test (`pnpm test:live`, by hand, mini only, twice at most) with a fake microphone fed from `tests/fixtures/question.wav`.
+- One `@live` Playwright test (`pnpm test:live`, by hand, mini only, twice at most) with a fake microphone fed from `test/fixtures/audio/question.wav` (synthetic; `LIVE_QUESTION_WAV` points it at a real recording).
 - Flake check: `--repeat-each=3` on the e2e suite before release.
 - Fill any SPEC matrix row whose proof is still missing.
 - Review-script dry run on production, steps RS-1 to RS-5, by hand.

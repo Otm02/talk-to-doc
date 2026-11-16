@@ -11,7 +11,10 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 3101;
 const MODEL = process.env.REALTIME_MODEL ?? "gpt-realtime-2.1-mini";
-const QUESTION = path.join(process.cwd(), "tests/fixtures/question.wav");
+const QUESTION = path.resolve(
+  process.cwd(),
+  process.env.LIVE_QUESTION_WAV ?? "test/fixtures/audio/question.wav",
+);
 
 export default defineConfig({
   testDir: "./e2e",

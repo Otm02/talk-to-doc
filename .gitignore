@@ -53,3 +53,6 @@ next-env.d.ts
 # Raw event recordings from the dev recorder: they contain whatever the document said.
 # Committed fixtures live in test/fixtures/realtime/ under other names, after review.
 realtime-session-*.jsonl
+
+# Windows "downloaded from the internet" marks that WSL shows as separate files
+*:Zone.Identifier
