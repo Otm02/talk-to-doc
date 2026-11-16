@@ -864,6 +864,20 @@ describe("connection", () => {
     });
     expect(s.pending).toEqual({});
     expect(s.response).toEqual({ activeId: null, audioId: null });
+    expect(s.notice).toBeNull();
+  });
+
+  it("clears a cap_warning or error notice when the session ends or fails", () => {
+    const warned = dispatch(connected(), {
+      type: "notice",
+      notice: { kind: "cap_warning", secondsLeft: 60 },
+    });
+    expect(to(warned, { status: "ended", reason: "max_duration" }).notice).toBeNull();
+    const errored = play([ev.error("invalid_value")], connected());
+    expect(errored.notice).toEqual({ kind: "error", code: "invalid_value" });
+    expect(
+      to(errored, { status: "failed", code: "session_reconnect_failed" }).notice,
+    ).toBeNull();
   });
 
   it("allows starting again after an end or a failure, then resets", () => {
@@ -1126,6 +1140,22 @@ describe("reconnecting", () => {
     expect(
       Object.values(after.items).some((i) => i.status === "streaming"),
     ).toBe(false);
+
+    // An error notice (e.g. session_expired) is cleared when settling for reconnect,
+    // while a cap_warning notice is preserved.
+    const withErr = to(play([ev.error("session_expired")], midAnswer()), grace);
+    expect(reducer(withErr, { type: "reconnect-settle" }).notice).toBeNull();
+    const withWarn = to(
+      dispatch(midAnswer(), {
+        type: "notice",
+        notice: { kind: "cap_warning", secondsLeft: 45 },
+      }),
+      grace,
+    );
+    expect(reducer(withWarn, { type: "reconnect-settle" }).notice).toEqual({
+      kind: "cap_warning",
+      secondsLeft: 45,
+    });
   });
 
   it("marks the epoch of a reconnected session once", () => {

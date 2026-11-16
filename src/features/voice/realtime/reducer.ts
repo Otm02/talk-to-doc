@@ -303,6 +303,7 @@ function applyConnection(
         // Whatever a retry was waiting on died with the chat.
         micRetry: "idle",
         activity: "listening",
+        notice: null,
         response: { activeId: null, audioId: null },
         pending: {},
       };
@@ -754,6 +755,7 @@ export function reducer(state: RealtimeState, action: Action): RealtimeState {
       return {
         ...settled,
         activity: "listening",
+        notice: state.notice?.kind === "error" ? null : state.notice,
         response: { activeId: null, audioId: null },
         pending: {},
       };
