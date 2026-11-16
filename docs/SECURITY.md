@@ -125,7 +125,7 @@ What keeps this acceptable: nothing user-controlled is ever rendered as HTML (T-
 | Logs | One JSON line per request with **request id, route, status, duration** and, when they apply, the **transcript provider** and our own **error code** (a catalog code such as `pdf_no_text`, never a message). A streamed response is logged when its body ends, so a scan found on the last page shows as `status 200, code pdf_no_text`. Nothing about documents: no titles, ids, URLs, text, error messages or IPs | `src/server/log.ts`, `src/server/http.ts`; `log.test.ts`, `http.test.ts`, and the "never logs" tests in the route tests |
 | Visitors | No accounts. An anonymous random id in an `HttpOnly` cookie is hashed into OpenAI's safety identifier header, so one abusive visitor cannot get the whole key flagged. Client addresses are HMAC-hashed (salted) before use in limiter keys | `src/server/session/identity.ts`, `src/server/security/rate-limit.ts` |
 
-One documented exception: for speed and to protect Supadata's free credits, the YouTube route caches the **public caption track** of a video for one hour under `yt:<videoId>:<lang>` (at most 500 KB). That is public data about a public video, not something a visitor supplied, but it is more than the budget-capped context. See [Not built](#not-built-and-known-gaps).
+One documented exception: for speed and to protect Supadata's free credits, the YouTube route caches the **public caption track** of a video for 24 hours under `yt:<videoId>:<lang>` (at most 500 KB). That is public data about a public video, not something a visitor supplied, but it is more than the budget-capped context. See [Not built](#not-built-and-known-gaps).
 
 ## 6. Prompt injection
 
@@ -144,7 +144,7 @@ This proves the **structure**. Whether a model obeys the fence is behaviour, whi
 Things an older doc says or the PLAN lists that the code does not do, and risks that were weighed and kept, so nobody assumes otherwise.
 
 - **T-07 as first written** (a nonce bound to the client IP hash in the token payload) is not implemented. The protection is the own-store URL check, the random unguessable suffix, the private store and delete-on-read.
-- **YouTube transcript cache.** The YouTube route caches the full public caption track for one hour, which goes beyond "only the capped context is stored" (see [§5](#5-privacy)). Kept to protect Supadata's credits; removing it is one deletion in `youtube/request.ts` and costs credits on repeat lookups.
+- **YouTube transcript cache.** The YouTube route caches the full public caption track for 24 hours, which goes beyond "only the capped context is stored" (see [§5](#5-privacy)). Kept to protect Supadata's credits; removing it is one deletion in `youtube/request.ts` and costs credits on repeat lookups.
 - **`script-src 'unsafe-inline'`** (see [§4](#4-headers-and-csp)). `connect-src` includes `https://vercel.com`, which the browser upload needs; with inline scripts allowed, an injected script could send data there. `https://*.public.blob.vercel-storage.com` stays in `connect-src` until M11 confirms in the Network panel which Blob hosts the upload uses.
 - **Failed Blob deletes are not logged**, because the log carries no free text. The daily cleanup cron is the backstop (it removes anything under `uploads/` older than an hour).
 - **Streamed failures log `status 200`** with a `code`: the 200 had already been sent when the stream failed.
