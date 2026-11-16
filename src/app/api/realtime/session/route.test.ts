@@ -741,7 +741,7 @@ describe("OpenAI errors", () => {
     );
   });
 
-  it("reports a missing API key as a config error naming only the variable", async () => {
+  it("reports a missing API key as a config error without naming anything", async () => {
     vi.stubEnv("OPENAI_API_KEY", "");
     resetEnvCacheForTests();
 
@@ -750,7 +750,8 @@ describe("OpenAI errors", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error.code).toBe("config_invalid");
-    expect(body.error.message).toContain("OPENAI_API_KEY");
+    expect(body.error.message).toBe("The server is not set up correctly.");
+    expect(JSON.stringify(body)).not.toContain("OPENAI_API_KEY");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

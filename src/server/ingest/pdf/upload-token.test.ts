@@ -142,14 +142,15 @@ describe("POST /api/upload/token", () => {
     expect(res.status).toBe(404);
   });
 
-  it("reports a missing token as a config error that names the variable only", async () => {
+  it("reports a missing token as a config error without naming anything", async () => {
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
     resetEnvCacheForTests();
     const res = await POST(tokenRequest("uploads/a.pdf"));
     const body = await res.json();
     expect(res.status).toBe(500);
     expect(body.error.code).toBe("config_invalid");
-    expect(body.error.message).toContain("BLOB_READ_WRITE_TOKEN");
+    expect(body.error.message).toBe("The server is not set up correctly.");
+    expect(JSON.stringify(body)).not.toContain("BLOB_READ_WRITE_TOKEN");
   });
 
   it("limits tokens per client to 20 an hour, with Retry-After", async () => {

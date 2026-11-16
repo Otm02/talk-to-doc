@@ -470,7 +470,7 @@ describe("failures after the stream has started", () => {
 });
 
 describe("configuration", () => {
-  it("blob mode without a token is a config error that names the variable only", async () => {
+  it("blob mode without a token is a config error without naming anything", async () => {
     vi.stubEnv("UPLOAD_MODE", "blob");
     resetEnvCacheForTests();
     const req = new Request("http://localhost/api/ingest/pdf", {
@@ -479,6 +479,7 @@ describe("configuration", () => {
       body: JSON.stringify({ blobUrl: "https://x" }),
     });
     const body = await expectError(await POST(req), 500, "config_invalid");
-    expect(body.error.message).toContain("BLOB_READ_WRITE_TOKEN");
+    expect(body.error.message).toBe("The server is not set up correctly.");
+    expect(JSON.stringify(body)).not.toContain("BLOB_READ_WRITE_TOKEN");
   });
 });

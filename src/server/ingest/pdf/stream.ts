@@ -130,11 +130,7 @@ async function finalize(
     words: pages.reduce((n, p) => n + countWords(p), 0),
     tokens,
   };
-  const capped = capToTokenBudget(
-    fullText,
-    options.contextTokenBudget,
-    tokens,
-  );
+  const capped = capToTokenBudget(fullText, options.contextTokenBudget, tokens);
   const context = capped.text;
   // What the model really gets, not what the budget allowed: the cut keeps
   // whole paragraphs, so it lands a little under the budget.
