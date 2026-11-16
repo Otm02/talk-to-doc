@@ -69,7 +69,12 @@ export function statusInfo(state: RealtimeState, online = true): PillInfo {
     case "idle":
       return { kind: "ready", label: "Ready", tone: "neutral" };
     case "requestingMic":
-      return { kind: "connecting", label: "Connecting", tone: "neutral" };
+      // The browser's permission prompt is up: say what it is waiting for.
+      return {
+        kind: "connecting",
+        label: "Allow the microphone",
+        tone: "neutral",
+      };
     case "connecting":
       // A first start whose mint got no answer: said as it is, not as "Connecting".
       return c.phase === "waitingNetwork"
