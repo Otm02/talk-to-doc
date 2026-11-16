@@ -177,7 +177,13 @@ describe("createPdfIngestStream", () => {
         prose("page" + (record.context.split("--- Page").length - 2), 12),
       ),
     ).toBe(true);
-    expect(record.coverage).toBeCloseTo(1000 / record.stats.tokens, 10);
+    // Honest: what is in the context over what the document has, so a cut
+    // that stops short of the budget (whole pages only) is not rounded up.
+    expect(record.coverage).toBeCloseTo(
+      countTokens(record.context) / record.stats.tokens,
+      10,
+    );
+    expect(record.coverage).toBeLessThan(1000 / record.stats.tokens);
     expect(done).toMatchObject({ done: true, coverage: record.coverage });
     // The stream still carried every page; only the stored copy is capped.
     expect(out.filter((l) => "page" in l)).toHaveLength(40);

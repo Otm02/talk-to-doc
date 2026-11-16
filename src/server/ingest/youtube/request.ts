@@ -108,12 +108,10 @@ export async function ingestYoutube(
     words: paragraphs.reduce((n, p) => n + countWords(p.text), 0),
     tokens,
   };
-  const coverage = Math.min(1, env.contextTokenBudget / Math.max(tokens, 1));
-  const { text: context } = capToTokenBudget(
-    fullText,
-    env.contextTokenBudget,
-    tokens,
-  );
+  const capped = capToTokenBudget(fullText, env.contextTokenBudget, tokens);
+  const context = capped.text;
+  // What the model really gets (the cut keeps whole paragraphs), not the budget.
+  const coverage = Math.min(1, capped.tokens / Math.max(tokens, 1));
 
   const documentId = crypto.randomUUID();
   const title = cleanTitle(transcript.title) || "YouTube video";
