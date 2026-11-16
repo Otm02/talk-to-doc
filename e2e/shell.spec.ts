@@ -26,12 +26,15 @@ test("sends security headers", async ({ request }) => {
   );
 });
 
-test("health reports only what the browser needs", async ({ request }) => {
+test("health reports only public config, never secrets", async ({
+  request,
+}) => {
   const res = await request.get("/api/health");
   expect(res.status()).toBe(200);
   expect(await res.json()).toEqual({
     ok: true,
     version: expect.any(String),
+    model: expect.stringMatching(/^gpt-realtime/),
     uploadMode: "direct",
     // memory or upstash, depending on whether the dev env has Upstash.
     state: expect.stringMatching(/^(memory|upstash)$/),

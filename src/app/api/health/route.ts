@@ -17,7 +17,9 @@ export const GET = handle("health", async (req) => {
       version: env.commitSha ? env.commitSha.slice(0, 7) : pkg.version,
       // The browser reads uploadMode to choose how to upload. `state` lets the
       // deploy smoke test see that production is not on per-instance memory.
-      // Nothing else about the setup (model, keys, limits) is public.
+      // `model` lets the deploy check see which Realtime model production uses.
+      // Nothing else about the setup (keys, limits) is public.
+      model: env.realtimeModel,
       uploadMode: env.uploadMode,
       state: env.stateDriver,
     },

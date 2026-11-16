@@ -160,6 +160,8 @@ describe("readBlob", () => {
       expect.objectContaining({
         access: "private",
         token: TOKEN,
+        // Deleted blobs must not be served from the CDN cache.
+        useCache: false,
         abortSignal: expect.any(AbortSignal),
       }),
     );

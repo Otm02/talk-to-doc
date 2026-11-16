@@ -80,6 +80,9 @@ export async function readBlob(
     const result = await get(blob.url, {
       access: blob.access,
       token,
+      // The CDN may keep serving a blob after it was deleted. Read from origin
+      // so a deleted upload is really gone (and a replay gets upload_missing).
+      useCache: false,
       abortSignal: signal,
     });
     if (!result || result.statusCode !== 200) {
