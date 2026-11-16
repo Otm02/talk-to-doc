@@ -130,15 +130,11 @@ async function finalize(
     words: pages.reduce((n, p) => n + countWords(p), 0),
     tokens,
   };
-  const coverage = Math.min(
-    1,
-    options.contextTokenBudget / Math.max(tokens, 1),
-  );
-  const { text: context } = capToTokenBudget(
-    fullText,
-    options.contextTokenBudget,
-    tokens,
-  );
+  const capped = capToTokenBudget(fullText, options.contextTokenBudget, tokens);
+  const context = capped.text;
+  // What the model really gets, not what the budget allowed: the cut keeps
+  // whole paragraphs, so it lands a little under the budget.
+  const coverage = Math.min(1, capped.tokens / Math.max(tokens, 1));
 
   const record: PdfDocumentRecord = {
     id: options.documentId,

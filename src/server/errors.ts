@@ -11,6 +11,8 @@ export type ErrorCode =
   | "upstream_failed"
   | CatalogCode;
 
+const CONFIG_INVALID_MESSAGE = "The server is not set up correctly.";
+
 export class AppError extends Error {
   constructor(
     readonly code: ErrorCode,
@@ -58,7 +60,8 @@ export interface ErrorResult {
 
 /**
  * Turns anything thrown into a client-safe response. Only AppError copy and
- * our own config message reach the client; upstream messages and stacks never do.
+ * fixed messages reach the client; upstream messages, stacks and the details
+ * of a bad environment never do.
  */
 export function toErrorResult(err: unknown, requestId: string): ErrorResult {
   if (err instanceof AppError) {
@@ -86,11 +89,13 @@ export function toErrorResult(err: unknown, requestId: string): ErrorResult {
     return catalogResult("invalid_request", requestId);
   }
   if (err instanceof EnvError) {
-    // Names variables and rules only, never values (see env.ts).
+    // Which variable is wrong, and the rule it broke, tell a stranger how the
+    // server is set up. The operator reads them in the thrown error (the
+    // build, a local run, `vercel env`), not in the response.
     return {
       status: 500,
       body: {
-        error: { code: "config_invalid", message: err.message },
+        error: { code: "config_invalid", message: CONFIG_INVALID_MESSAGE },
         requestId,
       },
     };

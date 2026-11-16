@@ -8,7 +8,7 @@ import {
   MicOff,
   PhoneOff,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   FullTextSheet,
@@ -49,6 +49,7 @@ import { StatusPill } from "./status-pill";
 import { Transcript } from "./transcript";
 import { useCompactLayout } from "./use-compact-layout";
 import { useOnline } from "@/lib/net/use-online";
+import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 
 export type VoiceSessionApi = ReturnType<typeof useVoiceSession>;
 
@@ -106,8 +107,18 @@ export function ConversationScreen({
     setTyping(false);
     onStart(mode);
   };
+  // The tap that opened the chat was on the page, which is now inert, so
+  // focus would be lost. Put it on the screen, unless the composer took it.
+  const root = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    const el = root.current;
+    if (el && !el.contains(document.activeElement)) el.focus();
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [confirmingEnd, setConfirmingEnd] = useState(false);
+  // "end": the End button. "leave": Back was pressed during a chat, so ending
+  // it also goes back to the document.
+  const [confirming, setConfirming] = useState<"end" | "leave" | null>(null);
   const [textOpen, setTextOpen] = useState(false);
   const [focus, setFocus] = useState<TextFocus | null>(null);
 
@@ -130,6 +141,17 @@ export function ConversationScreen({
   const c = state.connection;
   const live = isLive(state);
   const inProgress = isInProgress(state);
+
+  // Back leaves the chat for the document, but never drops a running chat
+  // without asking. A chat that is over, or never started, just closes.
+  useHistoryLayer(true, () => {
+    if (!inProgress) {
+      onClose();
+      return true;
+    }
+    setConfirming("leave");
+    return false;
+  });
   const connected = c.status === "connected";
   const textMode = state.mode === "text";
   const showComposer = inProgress && (textMode || typing);
@@ -189,6 +211,10 @@ export function ConversationScreen({
   );
   const hasNotice = state.notice !== null;
 
+  const sentText = state.order.some((id) => {
+    const item = state.items[id];
+    return item?.role === "user" && item.source === "text";
+  });
   const micBanner =
     state.micIssue && inProgress ? (
       <MicBanner
@@ -196,6 +222,7 @@ export function ConversationScreen({
         working={state.micRetry === "working"}
         fails={state.micRetryFails}
         canRetry={connected}
+        sentText={sentText}
         // Checks the mic first and only then touches the connection. It never
         // restarts the chat, so a mic that stays blocked costs no session.
         onRetry={actions.enableMic}
@@ -204,6 +231,11 @@ export function ConversationScreen({
 
   return (
     <div
+      ref={root}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabIndex={-1}
       data-testid="conversation"
       data-layout={slim ? "compact" : "full"}
       // --vvh / --vvt come from useCompactLayout: the visible area, which
@@ -219,6 +251,7 @@ export function ConversationScreen({
         )}
       >
         <h1
+          id={titleId}
           className={cn(
             "min-w-0 flex-1 truncate font-semibold",
             slim ? "text-sm" : "text-base",
@@ -387,7 +420,7 @@ export function ConversationScreen({
               type="button"
               aria-label="End"
               className="size-11 bg-destructive-solid text-white hover:bg-destructive-solid/90"
-              onClick={() => setConfirmingEnd(true)}
+              onClick={() => setConfirming("end")}
             >
               <PhoneOff aria-hidden />
             </Button>
@@ -410,9 +443,12 @@ export function ConversationScreen({
       )}
 
       <EndConfirm
-        open={confirmingEnd}
-        onOpenChange={setConfirmingEnd}
-        onEnd={onEnd}
+        open={confirming !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(null);
+        }}
+        leaving={confirming === "leave"}
+        onEnd={confirming === "leave" ? onClose : onEnd}
       />
       <SessionMenu
         open={menuOpen}

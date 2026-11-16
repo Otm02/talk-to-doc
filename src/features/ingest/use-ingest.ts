@@ -17,7 +17,7 @@ import {
   ingestReducer,
   type IngestRequest,
 } from "./ingest-state";
-import { checkPdfFile } from "./validate-pdf";
+import { checkPdfFile, checkPdfHeader } from "./validate-pdf";
 import { readIngestEvents } from "./ndjson-reader";
 import { getUploadMode, ingestPdf, ingestYoutube } from "./upload-client";
 
@@ -121,6 +121,9 @@ export function useIngest() {
           // Same checks as the server, so a bad file never leaves the phone.
           const check = checkPdfFile(file);
           if (!check.ok) throw new IngestError(check.code, check.code);
+          // Before any token is asked for: a renamed photo must not cost an upload.
+          const header = await checkPdfHeader(file);
+          if (!header.ok) throw new IngestError(header.code, header.code);
           dispatch({
             type: "upload-start",
             fileName: file.name,
@@ -203,7 +206,12 @@ export function useIngest() {
         } else if (error instanceof IngestError) {
           dispatch({
             type: "fail",
-            code: error.code,
+            // A link that never got an answer is the network's doing, not the
+            // video's: "couldn't load this video's captions" would be a lie.
+            code:
+              noAnswer && request.kind === "youtube"
+                ? "network_failed"
+                : error.code,
             retryAfterSeconds: error.retryAfterSeconds,
             // Fixed now, so the countdown reads the clock and cannot drift.
             retryAt:

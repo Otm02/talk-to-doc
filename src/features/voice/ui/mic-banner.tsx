@@ -36,6 +36,7 @@ export function MicBanner({
   working,
   fails,
   canRetry,
+  sentText,
   onRetry,
 }: {
   reason: MicFailure;
@@ -45,6 +46,8 @@ export function MicBanner({
   fails: number;
   /** False while the chat is not connected: there is nothing to attach a mic to. */
   canRetry: boolean;
+  /** The user has typed and sent a message in this chat. */
+  sentText: boolean;
   onRetry: () => void;
 }) {
   const coach = micCoach(useUserAgent());
@@ -52,6 +55,15 @@ export function MicBanner({
   // Closed until a retry fails; after that the user's own toggle wins.
   const [toggled, setToggled] = useState<boolean | null>(null);
   const open = hasSteps && (toggled ?? fails > 0);
+
+  // Someone who is typing has chosen text for now: fold the steps away so the
+  // answer gets the room, once, on the first message. The toggle still reopens
+  // them. (State adjusted during render, not in an effect, to avoid a flash.)
+  const [sawSent, setSawSent] = useState(sentText);
+  if (sentText !== sawSent) {
+    setSawSent(sentText);
+    if (sentText) setToggled(false);
+  }
 
   // The banner scrolls with the conversation, so a retry made from further
   // down would otherwise fail with nothing visible changing.

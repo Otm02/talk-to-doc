@@ -225,6 +225,15 @@ describe("failing to start", () => {
     );
   });
 
+  it("calls an ICE failure a failed connection, and only an unanswered request offline", () => {
+    expect(failureForTransportError(new TransportError("media"))).toBe(
+      "session_connect_failed",
+    );
+    expect(failureForTransportError(new TransportError("network"))).toBe(
+      "session_network_failed",
+    );
+  });
+
   it("can try again after a failure", async () => {
     const h = await started("voice", {
       mintError: new MintError("rate_limited"),

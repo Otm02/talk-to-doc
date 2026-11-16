@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 import { ReadyBar } from "@/features/document/ready-bar";
 import type { DocumentData } from "@/features/ingest/ingest-state";
 import type { Mode } from "../realtime/state";
@@ -38,6 +40,13 @@ export function VoiceChat({
 
   useWakeLock(isLive(state));
 
+  // The ready document is one step in: Back returns to the source screen, like
+  // "Use another source". The chat above it is a layer of its own.
+  useHistoryLayer(true, () => {
+    onUseAnother();
+    return true;
+  });
+
   // Leaving the page mid-chat would drop the connection without asking.
   useEffect(() => {
     if (!active) return;
@@ -70,16 +79,19 @@ export function VoiceChat({
         onStartVoice={() => start("voice")}
         onStartText={() => start("text")}
       />
-      {open && (
-        <ConversationScreen
-          doc={doc}
-          session={session}
-          onStart={start}
-          onReloadSource={onReloadSource}
-          onEnd={end}
-          onClose={close}
-        />
-      )}
+      {/* In <body>, so the page (AppShell) can be made inert while it is open. */}
+      {open &&
+        createPortal(
+          <ConversationScreen
+            doc={doc}
+            session={session}
+            onStart={start}
+            onReloadSource={onReloadSource}
+            onEnd={end}
+            onClose={close}
+          />,
+          document.body,
+        )}
     </>
   );
 }

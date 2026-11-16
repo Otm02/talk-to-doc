@@ -17,6 +17,7 @@ const base = {
   working: false,
   fails: 0,
   canRetry: true,
+  sentText: false,
   onRetry: () => {},
 } as const;
 
@@ -42,6 +43,28 @@ describe("MicBanner", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
     // The steps stay folded until a retry has actually failed.
     expect(screen.queryByTestId("mic-coach")).toBeNull();
+  });
+
+  it("folds the steps away when the user sends their first typed message, and the toggle reopens them", () => {
+    as(CHROME);
+    const { rerender } = render(<MicBanner {...base} fails={1} />);
+    expect(screen.getByTestId("mic-coach")).toBeInTheDocument();
+
+    rerender(<MicBanner {...base} fails={1} sentText />);
+    expect(screen.queryByTestId("mic-coach")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "How to allow it" }));
+    expect(screen.getByTestId("mic-coach")).toBeInTheDocument();
+    // Later renders with the message still sent do not fold it again.
+    rerender(<MicBanner {...base} fails={1} sentText />);
+    expect(screen.getByTestId("mic-coach")).toBeInTheDocument();
+  });
+
+  it("folds only once: a user who already sent text and then fails a retry sees the steps", () => {
+    as(CHROME);
+    const { rerender } = render(<MicBanner {...base} sentText />);
+    rerender(<MicBanner {...base} sentText fails={1} />);
+    expect(screen.getByTestId("mic-coach")).toBeInTheDocument();
   });
 
   it("opens the steps by itself after a failed retry, tailored to Chrome", () => {

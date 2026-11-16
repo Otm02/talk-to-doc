@@ -22,23 +22,37 @@ The browser talks to OpenAI directly for media, using a 60 s client secret minte
 
 ## 2. Module map
 
+Tests sit next to the code (`*.test.ts`), except what several suites share, which lives in `test/`. `scripts/spec-proofs.test.ts` keeps the paths in SPEC.md true; the lists below are checked by eye in review.
+
 ```
 src/
   app/                              Next routes. Pages render features; route handlers stay thin.
-    page.tsx                        ingest screen
-    d/[id]/page.tsx                 document + chat screen
+    layout.tsx, page.tsx            root layout (AppShell, fonts, viewport) and the ingest screen
+    not-found.tsx, error.tsx, global-error.tsx   "Page not found.", a crash below the layout, a crash of the layout itself
+    manifest.ts, icon.svg, apple-icon.png, favicon.ico, globals.css
     api/
-      health/route.ts               GET  liveness, build sha, state driver (no secrets)
-      limits/route.ts               GET  voice enabled? reason code if a guard is tripped (kill switch, daily cap)
-      upload/token/route.ts         POST Blob client-upload token (handleUpload)
+      health/route.ts               GET  { ok, version, uploadMode, state }: liveness, build, upload mode, state driver (no secrets)
+      upload/token/route.ts         POST Blob client-upload token (handleUpload, token events only)
       ingest/pdf/route.ts           POST {blobUrl, fileName?} (blob) or multipart "file" (direct) → NDJSON
       ingest/youtube/route.ts       POST {url, lang?} → NDJSON
-      documents/[id]/route.ts       GET  stored document (meta + pages), for reload and retries
-      session/route.ts              POST {documentId, history?} → client secret (history = the finished turns, on a reconnect)
-      cron/cleanup/route.ts         GET  daily: delete orphan blobs (CRON_SECRET)
+      realtime/session/route.ts     POST {documentId, history?} → client secret (history = the finished turns, on a reconnect)
+      cron/cleanup/route.ts         GET  daily: delete orphan uploads (CRON_SECRET)
+  components/                       app-wide UI
+    app-shell.tsx                   header, offline banner, main; inert while a chat is open
+    status-screen.tsx               the message screen behind not-found and the error pages
+    offline-banner.tsx, retry-button.tsx, chat-open.ts   offline notice; a button that counts down a 429's wait; "is a chat open" store
+    ui/                             shadcn primitives (button, popover, progress, sheet)
   features/                         client code, grouped by feature
-    ingest/                         source switch, file picker, URL field, upload client, NDJSON reader (idle timeout), partial-document notice, stall detector in use-ingest.ts
-    document/                       header, notices, collapsible text preview
+    ingest/
+      ingest-screen.tsx, use-ingest.ts, ingest-state.ts   the screen, the one hook that runs a load (retries, stall detector), its reducer
+      upload-client.ts, ndjson-reader.ts, ingest-error.ts  fetch/XHR with deadlines and the one retry, NDJSON with an idle timeout, typed failures
+      validate-pdf.ts, validate-youtube.ts   the client's checks first: size, type, the %PDF- header; the link
+      source-switch.tsx, pdf-picker.tsx, youtube-field.tsx, sample-chips.tsx, upload-status.tsx, error-card.tsx, error-copy.ts, partial-notice.tsx
+    document/
+      document-card.tsx, ready-bar.tsx   the ready document and its bottom bar
+      text-preview.tsx, full-text-sheet.tsx, text-groups.ts   excerpt, the full-screen text sheet, grouping/search/reflow
+      references.ts                 "page 12" and "[04:05]" in an answer → chips that open the text there
+      format.ts
     voice/
       realtime/                     the engine: protocol only, no UI. Framework-agnostic core + one hook
         transport.ts                RealtimeTransport interface, TransportError kinds
@@ -46,7 +60,7 @@ src/
         mock-transport.ts           scripted server (timed steps + replies to client events); scriptFromRecording() replays a recorded session
         mock-scenarios.ts, mock-names.ts   named scripts for tests and e2e (?mockRealtime=<name>); names kept apart so the mock stays a lazy chunk
         transport-factory.ts        mock (dev or mock build, ?mockRealtime=) or WebRTC
-        events.ts                   zod union for handled GA server events; known-but-unused events ignored, others counted, never thrown
+        events.ts, wire-events.ts   zod union for handled GA server events (unknown ones counted, never thrown); builders for the same events in tests
         state.ts, transcript.ts     state shape; previous_item_id ordering (epoch, then chains, arrival only as tie-break)
         reducer.ts                  pure (state, action) => state: transcript, interruption, activity, connection
         session.ts                  VoiceSession controller: mic, mint, transport, timers, cleanup; carries out the reconnect machine's effects; deps injected
@@ -54,42 +68,40 @@ src/
         session-deps.ts, mint.ts, mic.ts, audio.ts, levels.ts   browser wiring, mint client, getUserMedia, tap-time audio objects, AnalyserNode meters
         client-events.ts, failure.ts, usage.ts   events we send, client-side codes and copy, token totals
         prices.ts, cost.ts          per-model rates (with fetch date) and the session cost estimate
-        recorder.ts                 dev-only JSONL event log; redacts instructions and secrets
+        recorder.ts, debug.ts       dev-only JSONL event log (redacts instructions and secrets), the ?debug=1 switch
         use-voice-session.ts        the one hook: state, actions, level feed, estimated cost
-      ui/                           status pill, transcript, controls, composer, mic meter (M7)
-      dev-cost/                     dev-only overlay (cost-overlay.tsx): shown in development or with ?debug=1; never reported
+      ui/                           renders state, holds no protocol logic
+        voice-chat.tsx              wraps the ready document; opens the chat in <body> (portal) so the page can be inert
+        conversation-screen.tsx     the full-screen chat: header, orb, transcript, composer or control bar, sheets
+        transcript.tsx, bubble.tsx, use-stick-to-bottom.ts   conversation list, one bubble, scroll-pinning (re-pins when the keyboard resizes it)
+        composer.tsx, control-bar.tsx, end-confirm.tsx, session-menu.tsx, export-buttons.tsx
+        status-pill.tsx, status-map.ts, orb.tsx, level-dot.tsx, session-timer.tsx, reconnect-notice.tsx, failure-card.tsx
+        mic-banner.tsx, mic-coach.ts   why the mic is off, and the exact taps to turn it on
+        use-compact-layout.ts, use-visual-viewport.ts, use-wake-lock.ts
+      export/                       transcript as Markdown: build, copy, download
+      dev-cost/                     dev-only overlay (cost-overlay.tsx), shown in development or with ?debug=1; never reported
   server/                           server-only (import "server-only"); never imported by client code
-    env.ts                          the only reader of process.env; zod schema
-    errors/                         AppError (code from the catalog, cause kept for logs)
-    http/                           route helper: zod parse, AppError → { error }, request id, IP hash
-    log.ts                          structured logger with redaction
-    adapters/
-      document-store/{types,memory,upstash}.ts
-      rate-limiter/{types,memory,upstash}.ts   sliding window + daily fixed-window counter
-      index.ts                      picks memory or upstash from env.STATE_DRIVER
-    ingest/pdf/                     validate, extract (unpdf), normalize, stream, blob, multipart reader, token policy
-    context/budget.ts               token count and the CONTEXT_TOKEN_BUDGET cut
-    ingest/youtube/
-      provider.ts                   TranscriptProvider, typed errors, error -> catalog mapping
-      direct.ts                     InnerTube fetcher (consent, player, track pick, XML)
-      supadata.ts, oembed.ts        Supadata adapter; title and channel from oEmbed
-      captionsXml.ts, pickTrack.ts  hand-written caption parser; language preference
-      index.ts                      chain (fall through on BLOCKED, UPSTREAM_TIMEOUT, UPSTREAM_FAILED) and provider list
-      cache.ts, format.ts           1 h transcript cache; ~30 s paragraphs with [mm:ss]
-      request.ts                    the handler: limit, parse, cache, chain, cap, store, NDJSON
-    (the pure URL parser and timestamp formatter live in src/lib/youtube, shared with the UI)
-    context/                        token count, budget, markers, fences, coverage
-    realtime/                       client-secrets adapter, session config builder
-    guard/                          kill switch, IP limit, DAILY_SESSION_CAP
-    session/                        session service (guard → context → mint)
+    env.ts                          the only reader of process.env; zod schema; EnvError
+    errors.ts, http.ts, body.ts, read-capped.ts, log.ts   AppError and its client-safe mapping; the route wrapper (request id, rate-limit helpers); JSON bodies with byte caps; capped stream reads; the one request log line
+    state/                          the two adapters: types.ts, memory.ts, upstash.ts, index.ts (picks one from env); contract suite in test/state-contract.ts
+    security/                       client-ip.ts (/64 for IPv6), rate-limit.ts (HMAC-keyed limiter calls, fail closed), limits.ts
+    ingest/
+      record.ts                     what DocumentStore keeps: the context cut to the token budget, never the full text
+      pdf/                          request.ts (route logic), validate, extract (unpdf), normalize, stream, title, concurrency; blob.ts, upload-token.ts, cleanup.ts; multipart.ts; limits.ts
+      youtube/                      request.ts (route logic), index.ts (the chain), provider.ts, direct.ts (InnerTube), supadata.ts, oembed.ts, captionsXml.ts, pickTrack.ts, format.ts (~30 s paragraphs), cache.ts, guard.ts (daily Supadata cap), deadline.ts, limits.ts
+    context/                        budget.ts (token count and the CONTEXT_TOKEN_BUDGET cut), buildInstructions.ts (rules, fences, coverage, history)
+    realtime/createClientSecret.ts  the one call to OpenAI's client_secrets, with its timeout and typed errors
+    session/                        service.ts (guards → document → instructions → mint), document.ts, identity.ts (anonymous safety id), limits.ts
   lib/                              client-safe shared code
     errors/catalog.ts               code → status, copy, retry action
-    wire/                           zod schemas for request/response bodies and NDJSON lines
-    public-env.ts                   NEXT_PUBLIC_* non-secret config (upload mode, transport)
+    wire/                           zod schemas for request/response bodies and NDJSON lines (ingest.ts, session.ts, ndjson.ts)
+    youtube/                        parseUrl.ts (strict URL parser), timestamp.ts
     net/                            timeout.ts (deadline + abort), retry.ts (one retry with jitter), connectivity.ts (offline store, waitForConnection), use-online.ts
-e2e/                                Playwright specs (390x844, Chromium + WebKit)
-test/fixtures/                      PDFs, YouTube HTML/JSON/XML, Supadata JSON, realtime event logs
-scripts/                            make-fixtures.ts, check-bundle-secrets.ts
+    nav/                            history-layers.ts, use-history-layer.ts: Back closes a sheet, then the chat, then the ready document (section 3.5 of the SPEC)
+    public-env.ts, limits.ts, security-headers.ts, download.ts, use-countdown.ts, zod-jitless.ts, utils.ts
+e2e/                                Playwright specs (390x844, Chromium + WebKit); support.ts holds the shared helpers
+test/                               setup.ts, fixtures.ts, state-contract.ts, realtime/ (harness, fakes, script), youtubeFetch.ts, fixtures/ (pdf, youtube, realtime, audio)
+scripts/                            smoke.ts, make-fixtures.ts, check-bundle-secrets.ts, coverage-summary.ts, record-youtube-fixtures.ts, make-icons.ts, spec-proofs.test.ts
 ```
 
 Import rules, enforced with ESLint `no-restricted-imports`:
@@ -99,18 +111,18 @@ Import rules, enforced with ESLint `no-restricted-imports`:
 
 ## 3. Route handlers
 
-Every handler follows the same shape: `parse(zodSchema)`, then one service call, then a `Response`. AppError is mapped to `{ error: { code, message } }` with the catalog status. Exports are `runtime = "nodejs"` and, on ingest routes, `maxDuration = 300`.
+Every handler is `handle("<name>", fn)` from `src/server/http.ts`, which adds the request id, the one log line and the error mapping, around one service call. The service rate-limits first (fail closed), then validates with zod, then does its work and returns a `Response`. An AppError is mapped to `{ error: { code, message }, requestId }` with the catalog status; anything else is `internal`. Each route exports `maxDuration` and nothing else: no `runtime` and no `dynamic`.
 
-**Next 16 note:** `next.config.ts` enables `cacheComponents`. Under Cache Components, `export const dynamic = "force-dynamic"` is removed, not migrated (`node_modules/next/dist/docs/01-app/02-guides/migrating-to-cache-components.md`). Route handlers that read the request already run at request time. We export only `runtime` and `maxDuration`.
+**Next 16 note:** `next.config.ts` enables `cacheComponents`. Under Cache Components, `export const runtime` and `export const dynamic = "force-dynamic"` are errors (`node_modules/next/dist/docs/01-app/02-guides/migrating-to-cache-components.md`). Route handlers run on Node by default and, if they read the request, at request time.
 
-| Route | Input (zod) | Output | Guards |
-|---|---|---|---|
-| `GET /api/health` | — | `{ ok, version, uploadMode }` | health limit per IP (120/min) |
-| `POST /api/upload/token` | `generate-client-token` event only | Blob token JSON | token limit per IP (20/hour) and a global 150 a day (`rate_limited` until UTC midnight) |
-| `POST /api/ingest/pdf` | `{ blobUrl, fileName? }` (blob) or multipart `file` (direct) | NDJSON | ingest limit per IP (10/min) |
-| `POST /api/ingest/youtube` | `{ url, lang? }` | NDJSON | ingest limit; Supadata guard (3 lookups per UTC day, `youtube_quota`) |
-| `POST /api/realtime/session` | `{ documentId, history?: [{ role: "user" \| "assistant", text }] }` | `{ clientSecret, expiresAt, model }` (`expiresAt` is unix seconds, as OpenAI sends it) | `VOICE_ENABLED`, per-IP limit (15 per 10 min; a 429 carries `Retry-After` and `error.retryAfterSec`), `DAILY_SESSION_CAP` (counted only after a successful mint); OpenAI quota or billing error → 503 `budget_exhausted` |
-| `GET /api/cron/cleanup` | header `Authorization: Bearer CRON_SECRET` | `{ deleted }` | Vercel cron only (daily, `vercel.json`); cron limit per IP (5/min) before the secret is checked; deletes `uploads/*.pdf` older than 1 h |
+| Route | `maxDuration` | Input (zod) | Output | Guards |
+|---|---|---|---|---|
+| `GET /api/health` | 10 s | none | `{ ok, version, uploadMode, state }` (`state` is `memory` or `upstash`; nothing else about the setup) | health limit per IP (120/min) |
+| `POST /api/upload/token` | 15 s | `generate-client-token` event only | Blob token JSON | token limit per IP (20/hour) and a global 150 a day (`rate_limited` until UTC midnight) |
+| `POST /api/ingest/pdf` | 60 s (stops itself at 55 s) | `{ blobUrl, fileName? }` (blob) or multipart `file` (direct) | NDJSON | ingest limit per IP (10/min), 2 extractions at once per instance |
+| `POST /api/ingest/youtube` | 60 s | `{ url, lang? }` | NDJSON | ingest limit (10/min); Supadata guard (15 lookups per UTC day, `youtube_quota`) |
+| `POST /api/realtime/session` | 20 s | `{ documentId, history?: [{ role: "user" \| "assistant", text }] }`, body capped at 512 KB | `{ clientSecret, expiresAt, model, maxSessionSeconds }` (`expiresAt` is unix seconds, as OpenAI sends it) | `VOICE_ENABLED`, per-IP limit (15 per 10 min; a 429 carries `Retry-After` and `error.retryAfterSec`), `DAILY_SESSION_CAP` (counted only after a successful mint); OpenAI quota or billing error → 503 `budget_exhausted` |
+| `GET /api/cron/cleanup` | 30 s | header `Authorization: Bearer CRON_SECRET` | `{ deleted }` | Vercel cron only (daily, `vercel.json`); cron limit per IP (5/min) before the secret is checked; deletes `uploads/*.pdf` older than 1 h |
 
 ### NDJSON ingest protocol
 
@@ -142,12 +154,16 @@ On failure after the stream started: `{"error":{"code":"pdf_timeout","message":"
 
 ## 4. State and storage
 
+Two adapters in `src/server/state`, chosen by env (Upstash variables present means `upstash`, otherwise `memory`). Nothing relies on module-level memory in production.
+
 | Adapter | Memory impl (local, tests) | Upstash impl (Vercel) |
 |---|---|---|
-| DocumentStore | `Map` with TTL | `ttd:doc:{id}:meta` (JSON) + `ttd:doc:{id}:b:{k}` blocks of ≤ 512 KB of units, TTL 2 h; `ttd:ingest:{key}` → id; cached YouTube transcripts under the document id `yt:{videoId}:{lang}`, TTL 1 h |
-| RateLimiter | sliding window over timestamps; daily counter in a `Map` keyed by UTC date | `@upstash/ratelimit` sliding window, prefix `ttd:rl:{name}`, `analytics: false`, 2 s timeout, **fail closed** for mint and upload, fail open for reads; daily session counter is `INCR ttd:daily:{key}:{date}` with a 48 h TTL |
+| DocumentStore (`put`, `get`, `delete`, with a TTL) | `Map` with expiry | `{ns}:doc:{id}` → one JSON string, `PX` TTL. The record is the extracted context cut to the token budget plus stats and coverage, never the full text (the browser has it already). Cached YouTube transcripts live in the same store under the id `yt:{videoId}:{lang}`, TTL 24 h, and are skipped when over 500 KB (Upstash's request cap is 1 MB). Documents: `DOC_TTL_MINUTES` (2 h) |
+| RateLimiter (`limit` sliding window, `countDaily`, `peekDaily`) | timestamps in a `Map`; daily counter keyed by UTC date | `@upstash/ratelimit` sliding window under `{ns}:rl:{name}`, 2 s timeout, **fail closed** everywhere (a limiter that cannot answer refuses the request: `service_busy`); daily counters are `{ns}:daily:{key}:{date}` with a 48 h TTL |
 
-Blocks rather than per-page keys keep a 2,000-page PDF to a handful of Redis commands, under the free plan's 500K/month and 10 MB per request.
+`{ns}` is the state namespace from `env.ts`: `ttd` in Production, `ttd-preview` in Preview, `ttd-local` otherwise. The free Upstash plan has one database shared by every environment, so a preview cannot spend Production's daily caps. The live contract suite (`src/server/state/state.test.ts`) writes only under `ttd-test:<timestamp>` and deletes it afterwards, and runs only with `RUN_LIVE_UPSTASH_TESTS=1`.
+
+Each document is one Redis command and well under the free plan's 10 MB per request.
 
 ## 5. Sequence diagrams
 
@@ -224,7 +240,7 @@ sequenceDiagram
                 YT-->>B: error line
             end
         end
-        YT->>DS: cache transcript, 1 h TTL
+        YT->>DS: cache transcript, 24 h TTL
         YT->>YT: merge lines into ~30 s paragraphs
         YT-->>B: meta, segments, done
     end
@@ -383,21 +399,21 @@ From reference §1, all GA names: `session.type: "realtime"`, `model: env.REALTI
 
 ## 8. Environment
 
-Validated lazily in `src/server/env.ts` (first request, not build). Secrets are marked S; none has a `NEXT_PUBLIC_` prefix. This is the M1 list; later milestones add their own variables.
+Validated lazily in `src/server/env.ts` (first request, not build). Secrets are marked S; none has a `NEXT_PUBLIC_` prefix. Every variable the app reads is here.
 
 | Var | S | Default | Notes |
 |---|---|---|---|
 | `OPENAI_API_KEY` | S | none | needed only for live sessions (`requireOpenAIKey()`) |
 | `SUPADATA_API_KEY` | S | none | optional |
-| `REALTIME_MODEL` | | `gpt-realtime-2.1-mini` | mini or `gpt-realtime-2.1`; production switches at the end |
+| `REALTIME_MODEL` | | `gpt-realtime-2.1-mini` | mini or `gpt-realtime-2.1`; production switches to `gpt-realtime-2.1` at the end |
 | `REALTIME_VOICE` | | `marin` | |
 | `REALTIME_REASONING_EFFORT` | | `low` | minimal, low, medium, high |
-| `CONTEXT_TOKEN_BUDGET` | | 8000 | 1000-60000 |
+| `CONTEXT_TOKEN_BUDGET` | | 8000 | 1000-60000; production uses 20000 at the end |
 | `MAX_SESSION_MINUTES` | | 5 | |
 | `DOC_TTL_MINUTES` | | 120 | |
 | `UPLOAD_MODE` | | `direct` locally, `blob` on Vercel | `direct` refused on Vercel |
 | `VOICE_ENABLED` | | true | kill switch |
-| `DAILY_SESSION_CAP` | | 40 | session starts per UTC day, counted in RateLimiter |
+| `DAILY_SESSION_CAP` | | 40 | session starts per UTC day, counted in RateLimiter. 40 in dev and preview; production sets 15 (DEPLOY.md) |
 | `BLOB_READ_WRITE_TOKEN` | S | none | set by the Blob integration |
 | `IP_HASH_SALT` | S | random per run locally | at least 16 characters; required on Vercel; keys the client-address hash for limits |
 | `CRON_SECRET` | S | none | bearer token for the cleanup cron; unset means it refuses everyone |
@@ -405,7 +421,7 @@ Validated lazily in `src/server/env.ts` (first request, not build). Secrets are 
 | `UPSTASH_REDIS_REST_TOKEN` / `KV_REST_API_TOKEN` | S | none | set together with the URL |
 | `NEXT_PUBLIC_REALTIME_TRANSPORT` | | `webrtc` | `mock` in e2e |
 
-The state driver is inferred: Upstash variables present means `upstash`, otherwise `memory`. On Vercel (`VERCEL` or `VERCEL_ENV` set) the Upstash variables and `IP_HASH_SALT` are required and `UPLOAD_MODE=direct` is refused, so a misconfigured preview fails loudly. `IP_HASH_SALT`, `CRON_SECRET` and `YOUTUBE_PROVIDERS` from the earlier draft move to the milestones that use them.
+The state driver is inferred: Upstash variables present means `upstash`, otherwise `memory`. On Vercel (`VERCEL` or `VERCEL_ENV` set) the Upstash variables and `IP_HASH_SALT` are required and `UPLOAD_MODE=direct` is refused, so a misconfigured preview fails loudly. There is no `YOUTUBE_PROVIDERS` switch: `SUPADATA_API_KEY` being set is the switch.
 
 Next 16 note: with `cacheComponents`, `export const runtime` is a build error. Route handlers run on Node by default, so they export nothing.
 
@@ -413,7 +429,7 @@ Next 16 note: with `cacheComponents`, `export const runtime` is a build error. R
 
 | Decision | Alternatives | Why |
 |---|---|---|
-| **Host on Vercel Hobby** | Render free web service; Railway | The budget is $0 with no card. Render's free web services spin down after about 15 minutes idle, so a reviewer's first request waits on a cold start. Railway is usage-based after a trial credit, so a multi-week review would need a paid plan or a card. Vercel Hobby is free, needs no card, runs Next.js natively, gives free Git previews, and offers free Blob and Upstash through the Marketplace. We accept its limits by design: 4.5 MB bodies (Blob client upload), 300 s functions (streamed ingest with a 240 s budget), and no long-lived processes (no sideband) |
+| **Host on Vercel Hobby** | Render free web service; Railway | The budget is $0 with no card. Render's free web services spin down after about 15 minutes idle, so a reviewer's first request waits on a cold start. Railway is usage-based after a trial credit, so a multi-week review would need a paid plan or a card. Vercel Hobby is free, needs no card, runs Next.js natively, gives free Git previews, and offers free Blob and Upstash through the Marketplace. We accept its limits by design: 4.5 MB bodies (Blob client upload), a 60 s function budget on the ingest routes (the PDF pipeline stops itself at 55 s), and no long-lived processes (no sideband) |
 | Browser uploads straight to Vercel Blob | Multipart through the function; S3 presigned | Function bodies stop at 4.5 MB and our cap is 25 MB. Blob is free on Hobby and in-platform. `multipart: true` is skipped because it costs extra advanced ops and only helps above 100 MB |
 | Private Blob store, delete after ingest | Public store; keep files | We never serve PDFs back. Private plus delete limits exposure and keeps us far from the 1 GB cap and the 30-day lock-out |
 | Stream ingest as NDJSON | One JSON response; SSE | Streamed responses are exempt from the 4.5 MB cap; NDJSON is trivial to parse with `fetch` and a reader, works as a POST (SSE `EventSource` is GET-only), and lets the preview fill as pages arrive |
@@ -429,7 +445,7 @@ Next 16 note: with `cacheComponents`, `export const runtime` is a build error. R
 | YouTube provider chain: direct, then Supadata | Supadata only; a residential proxy; the YouTube Data API | Direct is free and works locally; YouTube blocks cloud IPs, so Supadata (free plan, no card) covers Vercel. Proxies cost money. The Data API only serves captions for videos you own |
 | Hand-written caption XML parser | fast-xml-parser; xml2js | The format is flat `<text start dur>` elements. A small parser that rejects DTDs avoids XXE and entity-expansion risk without a dependency |
 | No `middleware.ts` / `proxy.ts` | Middleware for headers and rate limits | Next buffers proxied request bodies at 10 MB, which would truncate local 25 MB direct uploads. Headers go in `next.config.ts`, limits in handlers |
-| Cache Components on; route config limited to `runtime` and `maxDuration` | `dynamic = "force-dynamic"` | Next 16 removes `dynamic` under Cache Components; request-reading handlers are already dynamic |
+| Cache Components on; route config limited to `maxDuration` | `dynamic = "force-dynamic"` | Next 16 removes `dynamic` under Cache Components; request-reading handlers are already dynamic |
 | Mock transport for tests and e2e | Live API in CI | The $20 budget forbids live calls in tests; recorded fixtures from the M6 checkpoint keep the mock honest |
 | Playwright on Chromium and WebKit at 390x844 | Chromium only | WebKit is the closest proxy for iOS Safari in CI; real devices are checked by hand (SPEC MC-3, MC-4) |
 

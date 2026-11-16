@@ -148,9 +148,10 @@ describe("a call that got no answer", () => {
     const { result } = renderHook(() => useIngest());
     act(() => void result.current.startYoutube("https://youtu.be/x"));
     await flush();
+    // Offline is said as offline, not as "couldn't load this video's captions".
     expect(result.current.state).toMatchObject({
       status: "error",
-      code: "youtube_failed",
+      code: "network_failed",
     });
     expect(isOffline()).toBe(true);
     expect(ingestYoutube).toHaveBeenCalledTimes(1);
@@ -257,7 +258,12 @@ describe("an upload that stops moving", () => {
     hangingUpload(10);
     const { result } = renderHook(() => useIngest());
     act(() => void result.current.startPdf(pdfFile()));
-    await flush(UPLOAD_STALL_MS + 1_000);
+    // Reading the file's first bytes takes a real moment; let it finish first
+    // so the stall clock has fake time left to tick in.
+    await vi.waitFor(() =>
+      expect(result.current.state.status).toBe("uploading"),
+    );
+    await flush(UPLOAD_STALL_MS + 2_000);
     expect(stalled(result)).toBe(true);
 
     act(() => result.current.keepWaiting());
@@ -272,7 +278,12 @@ describe("an upload that stops moving", () => {
     const upload = hangingUpload(10);
     const { result } = renderHook(() => useIngest());
     act(() => void result.current.startPdf(pdfFile()));
-    await flush(UPLOAD_STALL_MS + 1_000);
+    // Reading the file's first bytes takes a real moment; let it finish first
+    // so the stall clock has fake time left to tick in.
+    await vi.waitFor(() =>
+      expect(result.current.state.status).toBe("uploading"),
+    );
+    await flush(UPLOAD_STALL_MS + 2_000);
     expect(stalled(result)).toBe(true);
 
     act(() => upload.progress(11));
@@ -286,7 +297,12 @@ describe("an upload that stops moving", () => {
     hangingUpload(10);
     const { result } = renderHook(() => useIngest());
     act(() => void result.current.startPdf(pdfFile()));
-    await flush(UPLOAD_STALL_MS + 1_000);
+    // Reading the file's first bytes takes a real moment; let it finish first
+    // so the stall clock has fake time left to tick in.
+    await vi.waitFor(() =>
+      expect(result.current.state.status).toBe("uploading"),
+    );
+    await flush(UPLOAD_STALL_MS + 2_000);
     act(() => result.current.cancel());
     await flush();
     expect(result.current.state.status).toBe("idle");
@@ -397,5 +413,37 @@ describe("Load it again from a document that is already on screen", () => {
     await flush();
     expect(result.current.state.status).toBe("ready");
     expect(ingestYoutube).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a file that is not a PDF at all", () => {
+  it("is refused before any upload token is asked for", async () => {
+    const { result } = renderHook(() => useIngest());
+    // Named .pdf, typed as a PDF, but the bytes are a PNG.
+    const fake = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "a.pdf", {
+      type: "application/pdf",
+    });
+    act(() => void result.current.startPdf(fake));
+    await flush();
+    expect(result.current.state).toMatchObject({
+      status: "error",
+      code: "pdf_not_pdf",
+    });
+    expect(getUploadMode).not.toHaveBeenCalled();
+    expect(ingestPdf).not.toHaveBeenCalled();
+  });
+
+  it("lets a real header through, even with a few bytes of junk before it", async () => {
+    ingestPdf.mockResolvedValue(streamOf(pdfMeta, { page: 1, text: "a" }));
+    const { result } = renderHook(() => useIngest());
+    const junk = new TextEncoder().encode("\n\n  %PDF-1.7\n");
+    act(
+      () =>
+        void result.current.startPdf(
+          new File([junk], "a.pdf", { type: "application/pdf" }),
+        ),
+    );
+    await flush();
+    expect(ingestPdf).toHaveBeenCalledTimes(1);
   });
 });

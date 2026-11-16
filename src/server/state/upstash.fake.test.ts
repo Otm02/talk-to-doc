@@ -1,6 +1,6 @@
 import type { Redis } from "@upstash/redis";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runStateContract, type Harness } from "./contract";
+import { runStateContract, type Harness } from "@test/state-contract";
 import { LimiterUnavailableError } from "./types";
 import {
   createUpstashAdapters,

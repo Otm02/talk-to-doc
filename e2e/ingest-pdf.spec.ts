@@ -11,7 +11,7 @@ test.describe("PDF ingestion", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Sample PDF" }).click();
 
-    await expect(page.getByRole("heading", { level: 2 })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText("Whole document in context")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Start voice chat" }),

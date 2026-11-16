@@ -6,6 +6,7 @@ import {
 } from "@test/realtime/harness";
 import { MintError } from "./mint";
 import { scenarioScript } from "./mock-scenarios";
+import type { MockScript } from "./mock-transport";
 import { RECONNECT_GRACE_MS } from "./reconnect";
 import {
   FIRST_START_OFFLINE_WAIT_MS,
@@ -940,5 +941,99 @@ describe("a failure that came out of a reconnect", () => {
     expect(h.mint.mock.calls[0]?.[2]).toHaveLength(2);
     expect(h.session.getState().order).toEqual(before);
     expect(h.session.getState().reconnectMarks).toHaveLength(1);
+  });
+});
+
+describe("adding a microphone to a text chat that has to start a new session", () => {
+  /** A text chat (mic denied) whose connection will not take a mic track. */
+  const textChat = (
+    over: Omit<HarnessOptions, "script"> & {
+      script?: Partial<MockScript>;
+    } = {},
+  ) =>
+    started("voice", {
+      mic: "denied",
+      ...over,
+      script: { steps: [], micUpgrade: "fail", ...over.script },
+    });
+
+  const addMic = async (h: Harness) => {
+    h.setMic("ok", "prompt");
+    h.session.enableMic();
+    await settle(50);
+  };
+
+  it("keeps the chat's clock: the cap is not pushed back by the new session", async () => {
+    const h = await textChat({ session: { maxSessionSeconds: 180 } });
+    await settle(100_000);
+    expect(status(h)).toBe("connected");
+
+    await addMic(h);
+    expect(h.transports).toHaveLength(2);
+    expect(h.session.getState().mode).toBe("voice");
+    expect(status(h)).toBe("connected");
+
+    // 100 s in, so about 80 s are left, not a fresh 180.
+    await settle(70_000);
+    expect(status(h)).toBe("connected");
+    // The one-minute warning is due now that under a minute is left.
+    expect(h.session.getState().notice).toEqual({
+      kind: "cap_warning",
+      secondsLeft: 60,
+    });
+    await settle(15_000);
+    expect(conn(h)).toEqual({ status: "ended", reason: "max_duration" });
+    h.expectAllReleased();
+  });
+
+  it("says how little is left when the new session starts inside the last minute", async () => {
+    // A 90 s cap, so this stays clear of the 2-minute idle hang-up.
+    const h = await textChat({ session: { maxSessionSeconds: 90 } });
+    await settle(50_000);
+    await addMic(h);
+    const left = h.session.getState().notice;
+    expect(left?.kind).toBe("cap_warning");
+    expect(
+      left?.kind === "cap_warning" && left.secondsLeft,
+    ).toBeLessThanOrEqual(40);
+    await settle(41_000);
+    expect(conn(h)).toEqual({ status: "ended", reason: "max_duration" });
+  });
+
+  it("keeps the reconnect allowance already spent: six mints for the chat, not six more", async () => {
+    const h = await textChat({
+      session: { maxSessionSeconds: 3_600 },
+      script: { linkSteps: [{ at: 31_000, state: "failed" }] },
+    });
+    // Three quiet-link rebuilds are spent...
+    await settle(31_000 * 3 + 5_000);
+    expect(h.mint).toHaveBeenCalledTimes(1 + 3);
+    expect(status(h)).toBe("connected");
+
+    // ...then the mic is added, which starts one more session (not a reconnect).
+    await addMic(h);
+    expect(h.mint).toHaveBeenCalledTimes(1 + 3 + 1);
+
+    await settle(30 * 60_000);
+    expect(code(h)).toBe("session_reconnect_failed");
+    // 6 reconnect mints per chat in all: 3 before, 3 after.
+    expect(h.mint).toHaveBeenCalledTimes(1 + 6 + 1);
+    h.expectAllReleased();
+  });
+
+  it("a brand new chat after it ends gets the full length again", async () => {
+    const h = await textChat({ session: { maxSessionSeconds: 90 } });
+    await settle(45_000);
+    await addMic(h);
+    await settle(50_000);
+    expect(conn(h)).toEqual({ status: "ended", reason: "max_duration" });
+
+    h.queueTransport({ steps: [] });
+    h.session.start("text");
+    await settle(100);
+    await settle(80_000);
+    expect(status(h)).toBe("connected");
+    await settle(15_000);
+    expect(conn(h)).toEqual({ status: "ended", reason: "max_duration" });
   });
 });

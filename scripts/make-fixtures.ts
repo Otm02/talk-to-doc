@@ -1,5 +1,6 @@
 /**
- * Generates the PDF fixtures in test/fixtures/pdf. Run with `pnpm fixtures`.
+ * Generates the PDF fixtures in test/fixtures/pdf, and the placeholder
+ * question in test/fixtures/audio. Run with `pnpm fixtures`.
  *
  * Dependency-free on purpose: the PDFs are written by hand (uncompressed, no
  * timestamps, no randomness), so the output is byte-for-byte reproducible and
@@ -557,6 +558,79 @@ export function buildFixtures(): Map<string, Uint8Array<ArrayBuffer>> {
   ]);
 }
 
+// --- Audio -------------------------------------------------------------------
+
+const SAMPLE_RATE = 16_000;
+
+/**
+ * A 3-second, 16 kHz, mono, 16-bit PCM WAV for the @live test's fake
+ * microphone. It is synthetic on purpose: nobody's voice is committed. It is
+ * speech-shaped (a wavering 120 Hz voice, vowel-like resonances, four
+ * syllables with gaps) so a voice detector sees something to react to, but it
+ * says nothing, so the model has no question to answer. For a real answer,
+ * record yourself and point LIVE_QUESTION_WAV at the file (see
+ * test/fixtures/audio/README.md). Pure arithmetic, no randomness: the bytes
+ * are the same on every run.
+ */
+export function buildQuestionWav(): Uint8Array<ArrayBuffer> {
+  const seconds = 3;
+  const total = SAMPLE_RATE * seconds;
+  const pcm = new Int16Array(total);
+  // [start s, end s, F1 Hz, F2 Hz]: four "syllables", each with its own vowel.
+  const syllables = [
+    [0.2, 0.7, 700, 1200],
+    [0.8, 1.3, 500, 1800],
+    [1.4, 2.0, 300, 2300],
+    [2.1, 2.7, 600, 1000],
+  ] as const;
+  for (let i = 0; i < total; i += 1) {
+    const t = i / SAMPLE_RATE;
+    const syllable = syllables.find(([a, b]) => t >= a && t < b);
+    if (!syllable) continue;
+    const [start, end, f1, f2] = syllable;
+    // Raised-cosine fade in and out, so no clicks at the edges.
+    const x = (t - start) / (end - start);
+    const envelope = 0.5 - 0.5 * Math.cos(2 * Math.PI * x);
+    const f0 = 120 + 15 * Math.sin(2 * Math.PI * 0.8 * t);
+    let sample = 0;
+    // Harmonics of f0, each weighted by how close it is to a formant.
+    for (let h = 1; h * f0 < 4000; h += 1) {
+      const f = h * f0;
+      const gain =
+        1 / h +
+        Math.exp(-(((f - f1) / 120) ** 2)) +
+        0.6 * Math.exp(-(((f - f2) / 200) ** 2));
+      sample += gain * Math.sin(2 * Math.PI * f * t);
+    }
+    pcm[i] = Math.round(
+      Math.max(-1, Math.min(1, sample * envelope * 0.12)) * 32767,
+    );
+  }
+  const data = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  const out = new Uint8Array(44 + data.length);
+  const view = new DataView(out.buffer);
+  const tag = (offset: number, text: string) => {
+    for (let k = 0; k < text.length; k += 1) {
+      out[offset + k] = text.charCodeAt(k);
+    }
+  };
+  tag(0, "RIFF");
+  view.setUint32(4, 36 + data.length, true);
+  tag(8, "WAVE");
+  tag(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, SAMPLE_RATE, true);
+  view.setUint32(28, SAMPLE_RATE * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  tag(36, "data");
+  view.setUint32(40, data.length, true);
+  out.set(data, 44);
+  return out;
+}
+
 function main(): void {
   const dir = join(
     dirname(fileURLToPath(import.meta.url)),
@@ -570,6 +644,11 @@ function main(): void {
     writeFileSync(join(dir, name), bytes);
     console.log(`${name}  ${bytes.length} bytes`);
   }
+  const audioDir = join(dir, "..", "audio");
+  mkdirSync(audioDir, { recursive: true });
+  const wav = buildQuestionWav();
+  writeFileSync(join(audioDir, "question.wav"), wav);
+  console.log(`question.wav  ${wav.length} bytes`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) main();

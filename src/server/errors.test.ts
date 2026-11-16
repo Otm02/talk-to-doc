@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { EnvError } from "./env";
-import { AppError, catalogError, toErrorResult } from "./errors";
+import { AppError, catalogError, publicError, toErrorResult } from "./errors";
 
 describe("toErrorResult", () => {
   it("maps AppError to its status and copy", () => {
@@ -29,11 +29,21 @@ describe("toErrorResult", () => {
     expect(JSON.stringify(r.body)).not.toContain("secret-input");
   });
 
-  it("maps EnvError to config_invalid", () => {
-    const r = toErrorResult(new EnvError(["UPLOAD_MODE: bad"]), "req-3");
+  it("maps EnvError to config_invalid with fixed copy: no variable names, no rules", () => {
+    const err = new EnvError([
+      "UPLOAD_MODE: bad",
+      "DAILY_SESSION_CAP: must be a whole number",
+    ]);
+    const r = toErrorResult(err, "req-3");
     expect(r.status).toBe(500);
     expect(r.body.error.code).toBe("config_invalid");
-    expect(r.body.error.message).toContain("UPLOAD_MODE");
+    expect(r.body.error.message).toBe("The server is not set up correctly.");
+    const sent = JSON.stringify(r.body);
+    expect(sent).not.toMatch(
+      /UPLOAD_MODE|DAILY_SESSION_CAP|whole number|\.env/,
+    );
+    // publicError is what other callers (NDJSON error lines) use.
+    expect(JSON.stringify(publicError(err))).not.toContain("UPLOAD_MODE");
   });
 
   it("turns unknown errors into a generic internal error", () => {

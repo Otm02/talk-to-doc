@@ -27,7 +27,9 @@ export function SourceSwitch({
   });
 
   function onKeyDown(event: KeyboardEvent) {
-    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key))
+    if (
+      !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)
+    )
       return;
     event.preventDefault();
     const next: Source = value === "pdf" ? "youtube" : "pdf";

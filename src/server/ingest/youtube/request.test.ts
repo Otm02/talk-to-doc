@@ -1,3 +1,4 @@
+import { countTokens } from "@/server/context/budget";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ERROR_CATALOG } from "@/lib/errors/catalog";
 import {
@@ -205,8 +206,8 @@ describe("ingestYoutube: the stream", () => {
     const done = lines[lines.length - 1];
     if (!done || !("done" in done)) throw new Error("no done line");
     expect(done.stats.tokens).toBeGreaterThan(1000);
-    expect(done.coverage).toBeCloseTo(1000 / done.stats.tokens, 5);
     expect(done.coverage).toBeLessThan(1);
+    expect(done.coverage).toBeLessThanOrEqual(1000 / done.stats.tokens);
 
     const meta = lines[0];
     if (!meta || !("documentId" in meta)) throw new Error("no meta");
@@ -222,6 +223,10 @@ describe("ingestYoutube: the stream", () => {
     );
     // Whole paragraphs only: it ends where a paragraph ends.
     expect(record.context).not.toMatch(/\[\d\d:\d\d\]\s*$/);
+    expect(done.coverage).toBeCloseTo(
+      countTokens(record.context) / done.stats.tokens,
+      10,
+    );
   });
 
   it("passes the browser language to the chain, defaulting to English", async () => {

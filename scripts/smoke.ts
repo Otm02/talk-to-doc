@@ -21,7 +21,10 @@ import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const DEFAULT_PDF = "test/fixtures/pdf/multi-page.pdf";
-// "Me at the zoo": 19 s, manual captions, never taken down.
+// "Me at the zoo": 19 s, manual captions, never taken down. It is also the
+// "Sample video" chip in the app, so the transcript is usually already in the
+// 24 h cache and a smoke run does not spend a Supadata lookup. Keep the two in
+// step (scripts/smoke.test.ts checks).
 export const DEFAULT_YOUTUBE = "https://youtu.be/jNQXAC9IVRw";
 
 export interface SmokeOptions {

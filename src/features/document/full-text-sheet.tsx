@@ -10,6 +10,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 import { copyText } from "@/features/voice/export/export-actions";
 import type { ReferenceTarget } from "./references";
 import {
@@ -51,6 +52,8 @@ export function FullTextSheet({
   complete,
   focus = null,
 }: Props) {
+  // The phone's Back closes the sheet instead of leaving the page.
+  useHistoryLayer(open, () => onOpenChange(false));
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -251,7 +254,12 @@ function SheetBody({
 
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+        // Focusable, so the arrow keys and Page Down scroll it without a
+        // pointer; a region, so that stop has a name.
+        tabIndex={0}
+        role="region"
+        aria-label="Full text"
+        className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
       >
         {groups.slice(0, rendered).map((group) => (
           <section
@@ -261,9 +269,9 @@ function SheetBody({
             // Skips layout and paint for groups far off screen.
             className="scroll-mt-2 border-b py-3 [contain-intrinsic-size:auto_240px] [content-visibility:auto]"
           >
-            <h4 className="mb-1 text-xs font-semibold text-muted-foreground">
+            <h3 className="mb-1 text-xs font-semibold text-muted-foreground">
               {group.label}
-            </h4>
+            </h3>
             {group.units.map((unit) => (
               <UnitText
                 key={unit.id}
@@ -309,42 +317,50 @@ function UnitText({
 }) {
   const parts = count > 0 ? splitByQuery(unit.text, query) : null;
   let seen = 0;
+  const body = parts
+    ? parts.map((part, i) => {
+        if (!part.match) return <span key={i}>{part.text}</span>;
+        const isActive = base !== undefined && base + seen === active;
+        seen += 1;
+        return (
+          <mark
+            key={i}
+            data-active={isActive}
+            className={
+              isActive
+                ? "rounded bg-primary text-primary-foreground"
+                : "rounded bg-accent text-accent-foreground"
+            }
+          >
+            {part.text}
+          </mark>
+        );
+      })
+    : unit.text;
+  const textClass =
+    "min-w-0 text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap";
+
+  if (!unit.stamp) {
+    return (
+      <p data-ref-id={unit.id} className={`scroll-mt-2 py-1 ${textClass}`}>
+        {body}
+      </p>
+    );
+  }
+  // The timestamp sits beside the text, not inside it: a 44 px link inside the
+  // first line would make that line 44 px tall.
   return (
-    <p
-      data-ref-id={unit.id}
-      className="scroll-mt-2 py-1 text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap"
-    >
-      {unit.stamp && (
-        <a
-          href={unit.stamp.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`Open at ${unit.stamp.label} on YouTube`}
-          className="mr-2 inline-flex min-h-11 min-w-11 items-center font-mono text-xs text-primary underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
-          {unit.stamp.label}
-        </a>
-      )}
-      {parts
-        ? parts.map((part, i) => {
-            if (!part.match) return <span key={i}>{part.text}</span>;
-            const isActive = base !== undefined && base + seen === active;
-            seen += 1;
-            return (
-              <mark
-                key={i}
-                data-active={isActive}
-                className={
-                  isActive
-                    ? "rounded bg-primary text-primary-foreground"
-                    : "rounded bg-accent text-accent-foreground"
-                }
-              >
-                {part.text}
-              </mark>
-            );
-          })
-        : unit.text}
-    </p>
+    <div data-ref-id={unit.id} className="flex scroll-mt-2 items-start gap-1">
+      <a
+        href={unit.stamp.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Open at ${unit.stamp.label} on YouTube`}
+        className="-ml-1 flex min-h-11 min-w-11 shrink-0 items-start justify-center pt-[0.4rem] font-mono text-xs text-primary underline underline-offset-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        {unit.stamp.label}
+      </a>
+      <p className={`flex-1 pt-[0.35rem] ${textClass}`}>{body}</p>
+    </div>
   );
 }

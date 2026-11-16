@@ -13,7 +13,7 @@ export function TextPreview({ doc }: { doc: DocumentData }) {
 
   return (
     <section aria-label="Extracted text" className="flex flex-col gap-2">
-      <h3 className="text-sm font-medium">Extracted text</h3>
+      <h2 className="text-sm font-medium">Extracted text</h2>
       <p className="rounded-lg border bg-muted/40 p-3 text-sm leading-relaxed break-words whitespace-pre-wrap">
         {excerpt || "Reading…"}
       </p>

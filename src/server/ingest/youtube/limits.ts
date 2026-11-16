@@ -3,14 +3,19 @@ import type { RateRule } from "../../state";
 
 export const YOUTUBE_INGEST_RATE: RateRule = { max: 10, windowMs: 60_000 };
 
-// Supadata's free plan is 100 credits a month and a lookup costs one. Counters
-// here are per UTC day, so 3 a day keeps a 31-day month at 93 at most.
+// Supadata's free plan is 100 credits a month and a lookup costs one. The
+// counter is per UTC day. 3 a day was too tight for a review: a handful of
+// different videos in one sitting hit `youtube_quota`. 15 a day is a ceiling on
+// one day's burst, not a promise about the month: 100 credits last about a week
+// of days that all reach the cap. The 24 h transcript cache below is what keeps
+// ordinary use well under it.
 export const SUPADATA_DAILY_KEY = "supadata-lookups";
-export const SUPADATA_DAILY_CAP = 3;
+export const SUPADATA_DAILY_CAP = 15;
 
-// Cached by video and language so repeated tests and demos do not spend
-// Supadata credits (100 a month on the free plan).
-export const TRANSCRIPT_CACHE_TTL_MS = 60 * 60_000;
+// Cached by video and language so repeated tests, smoke runs and demos do not
+// spend Supadata credits. A day, because captions of a published video do not
+// change and the Upstash free plan holds a few dozen of these easily.
+export const TRANSCRIPT_CACHE_TTL_MS = 24 * 60 * 60_000;
 // Upstash's free plan rejects requests over 1 MB; stay well under.
 export const TRANSCRIPT_CACHE_MAX_BYTES = 500_000;
 

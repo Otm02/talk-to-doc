@@ -67,7 +67,7 @@ The key belongs to the project owner and has a **hard $20 limit set in OpenAI bi
 | Final QA and the video | `gpt-realtime-2.1`, 20,000 tokens | up to $4 |
 | Review | whatever is left under the $20 limit | — |
 
-A 5-minute chat is estimated at about $0.12 on mini and $0.49 on 2.1 with a 20k context (SPEC §7.2; only mini was measured). If every `DAILY_SESSION_CAP` start were a full-length chat, the daily worst case is the cap times that, which is why the cap is a production setting of 25 or so and not left high.
+A 5-minute chat is estimated at about $0.12 on mini and $0.49 on 2.1 with a 20k context (SPEC §7.2; only mini was measured). If every `DAILY_SESSION_CAP` start were a full-length chat, the daily worst case is the cap times that, which is why production sets the cap to 15 and does not leave the code default of 40 (about $7 a day at the very worst on 2.1).
 
 ### The guards
 
@@ -87,7 +87,7 @@ A 5-minute chat is estimated at about $0.12 on mini and $0.49 on 2.1 with a 20k 
 
 Text mode and voice share these guards, and ingestion and the preview never depend on them: when a guard trips, the extracted text still works.
 
-`DAILY_SESSION_CAP` has a code default of 40; the values planned per environment are in SPEC §7.4.
+`DAILY_SESSION_CAP` has a code default of 40, which dev and preview use; production sets 15. The values per environment are in SPEC §7.4 and DEPLOY.md.
 
 `MAX_SESSION_MINUTES` is a courtesy to honest users and to the budget, not a security boundary: a client that ignores it can keep a chat open past the limit until OpenAI ends it. Such a client still needs a secret, so it is bounded by the per-IP limit, the daily cap and, finally, OpenAI's hard limit.
 

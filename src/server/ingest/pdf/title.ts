@@ -1,3 +1,4 @@
+import "server-only";
 const MAX_TITLE_CHARS = 200;
 const FALLBACK = "PDF document";
 

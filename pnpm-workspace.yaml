@@ -1,3 +1,7 @@
 allowBuilds:
   sharp: false
   unrs-resolver: false
+# @vercel/blob pulls in a zod older than 4.6.6, which has a memory-exhaustion
+# advisory (GHSA-mrhx-c7xc-m3w5). One zod for the whole tree, the one we use.
+overrides:
+  zod: ^4.6.7

@@ -22,7 +22,11 @@ export function ReadyBar({
           <Keyboard aria-hidden />
           Type instead
         </Button>
-        <Button variant="outline" className="h-11 flex-1" onClick={onUseAnother}>
+        <Button
+          variant="outline"
+          className="h-11 flex-1"
+          onClick={onUseAnother}
+        >
           Use another source
         </Button>
       </div>

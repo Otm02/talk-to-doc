@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   initialState,
   type RealtimeState,
@@ -171,6 +171,86 @@ describe("Transcript", () => {
     fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
     expect(scroller.scrollTo).toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+  });
+});
+
+describe("Transcript: the soft keyboard resizes the scroll area", () => {
+  let fire: () => void;
+  let size: { client: number; scroll: number };
+
+  beforeEach(() => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    size = { client: 600, scroll: 1000 };
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          fire = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    Object.defineProperties(HTMLElement.prototype, {
+      clientHeight: { configurable: true, get: () => size.client },
+      scrollHeight: { configurable: true, get: () => size.scroll },
+    });
+  });
+  afterEach(() => {
+    // Back to jsdom's own (always 0) getters.
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+      .clientHeight;
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+      .scrollHeight;
+    vi.unstubAllGlobals();
+  });
+
+  const mount = () => {
+    render(
+      <Transcript
+        state={stateWith(item("a", { text: "latest answer" }))}
+        onRetry={vi.fn()}
+        empty=""
+      />,
+    );
+    return screen.getByLabelText("Conversation");
+  };
+
+  it("keeps the newest answer in view when the keyboard shrinks the area", () => {
+    const scroller = mount();
+    scroller.scrollTop = 400; // at the end: 1000 - 400 - 600 = 0
+    fireEvent.scroll(scroller);
+
+    size.client = 180; // keyboard opens
+    fire();
+    expect(scroller.scrollTop).toBe(1000);
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+  });
+
+  it("re-pins a reader who was within a short distance of the end", () => {
+    const scroller = mount();
+    scroller.scrollTop = 370; // 30 px from the end, inside the 48 px margin
+    fireEvent.scroll(scroller);
+
+    size.client = 180;
+    fire();
+    expect(scroller.scrollTop).toBe(1000);
+  });
+
+  it("leaves a reader who scrolled up where they were", () => {
+    const scroller = mount();
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
+    expect(
+      screen.getByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+
+    size.client = 180;
+    fire();
+    expect(scroller.scrollTop).toBe(100);
+    expect(
+      screen.getByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
   });
 });
 

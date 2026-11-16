@@ -48,6 +48,36 @@ async function failure(): Promise<OpenAIRequestError> {
   throw new Error("expected createClientSecret to throw");
 }
 
+describe("an error body that never ends", () => {
+  it("is read for 4 KB at most, and the failure is still classified", async () => {
+    let pulls = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(1024).fill(32)); // spaces
+      },
+    });
+    stub(new Response(endless, { status: 503 }));
+    const err = await failure();
+    expect(err.kind).toBe("busy");
+    expect(pulls).toBeLessThan(12);
+  });
+
+  it("still finds a billing code that comes first in a long body", async () => {
+    const padding = " ".repeat(10_000);
+    stub(
+      new Response(
+        `{"error":{"code":"insufficient_quota","type":"x"}}${padding}`,
+        { status: 429 },
+      ),
+    );
+    // The JSON is complete inside the first 4 KB only if it is cut after it;
+    // a cut inside trailing padding keeps it parseable.
+    const err = await failure();
+    expect(err.kind).toBe("budget");
+  });
+});
+
 describe("createClientSecret", () => {
   it("returns the value, the expiry and the configured model", async () => {
     stub(Response.json({ value: "ek_x", expires_at: 1_800_000_000 }));

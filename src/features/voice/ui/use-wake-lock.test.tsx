@@ -58,6 +58,36 @@ describe("useWakeLock", () => {
     expect(w.request).toHaveBeenCalledTimes(2);
   });
 
+  it("never holds two locks when the page comes back while the first request is pending", async () => {
+    const releases: Array<ReturnType<typeof vi.fn>> = [];
+    let settleFirst: () => void = () => {};
+    const request = vi.fn(
+      () =>
+        new Promise<WakeLockSentinel>((resolve) => {
+          const release = vi.fn(() => Promise.resolve());
+          releases.push(release);
+          const lock = { release } as unknown as WakeLockSentinel;
+          if (request.mock.calls.length === 1)
+            settleFirst = () => resolve(lock);
+          else resolve(lock);
+        }),
+    );
+    vi.stubGlobal("navigator", { ...navigator, wakeLock: { request } });
+
+    const view = render(<Probe active />);
+    // Back in the foreground while the first request has not answered yet.
+    setVisibility("visible");
+    await flush();
+    expect(request).toHaveBeenCalledTimes(1);
+
+    settleFirst();
+    await flush();
+    expect(releases[0]).not.toHaveBeenCalled(); // that one is the lock we hold
+    view.rerender(<Probe active={false} />);
+    expect(releases[0]).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("copes with a browser that refuses or lacks the API", async () => {
     vi.stubGlobal("navigator", {
       ...navigator,

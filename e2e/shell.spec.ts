@@ -37,3 +37,26 @@ test("health reports only what the browser needs", async ({ request }) => {
     state: expect.stringMatching(/^(memory|upstash)$/),
   });
 });
+
+test("an unknown address shows Page not found with a way home", async ({
+  page,
+}) => {
+  const res = await page.goto("/no-such-page");
+  expect(res?.status()).toBe(404);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Page not found." }),
+  ).toBeVisible();
+  const overflow = await page.evaluate(
+    () =>
+      document.documentElement.scrollWidth -
+      document.documentElement.clientWidth,
+  );
+  expect(overflow).toBe(0);
+  const home = page.getByRole("link", { name: "Go home" });
+  const box = await home.boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await home.click();
+  await expect(
+    page.getByRole("heading", { name: "Talk to a document" }),
+  ).toBeVisible();
+});

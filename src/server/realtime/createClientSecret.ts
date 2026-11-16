@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { getEnv, requireOpenAIKey } from "../env";
 import { AppError, catalogError } from "../errors";
+import { readTextPrefix } from "../read-capped";
 
 // Mints a short-lived Realtime client secret. Request shape: docs/reference/
 // openai-realtime.md section 1 (GA names only). The adapter owns the timeout
@@ -115,10 +116,12 @@ export function buildSessionRequest(
   };
 }
 
+const ERROR_BODY_MAX_BYTES = 4096;
+
 async function readErrorCode(res: Response): Promise<string | undefined> {
   try {
-    // Capped read: an error body is a few hundred bytes; never trust more.
-    const text = (await res.text()).slice(0, 4096);
+    // An error body is a few hundred bytes; never read more than 4 KB of it.
+    const text = await readTextPrefix(res, ERROR_BODY_MAX_BYTES);
     const parsed = ErrorBodySchema.safeParse(JSON.parse(text));
     if (!parsed.success) return undefined;
     const { code, type } = parsed.data.error ?? {};

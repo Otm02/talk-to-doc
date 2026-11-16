@@ -99,6 +99,91 @@ describe("ConversationScreen", () => {
     return { h, onClose };
   }
 
+  describe("the Back button", () => {
+    // jsdom reports a history traversal with popstate on a timer.
+    const pressBack = async () => {
+      window.history.back();
+      await settle(50);
+    };
+
+    it("asks before leaving a running chat, and Keep talking stays", async () => {
+      const { h, onClose } = await start("text");
+      await pressBack();
+      expect(
+        screen.getByText(
+          "You will go back to the document, and this conversation is cleared.",
+        ),
+      ).toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(h.transport.closeCount).toBe(0);
+
+      // Back on the question itself is "Keep talking".
+      await pressBack();
+      expect(screen.queryByText("End this chat?")).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+
+      // The chat kept its place in history: Back asks again.
+      await pressBack();
+      expect(screen.getByText("End this chat?")).toBeInTheDocument();
+    });
+
+    it("ending from that question leaves for the document", async () => {
+      const { h, onClose } = await start("text");
+      await pressBack();
+      tap("End chat");
+      await settle();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(h.transport.closeCount).toBe(0); // the parent's close ends it
+    });
+
+    it("the End button's question keeps the chat on screen, as before", async () => {
+      const { onClose } = await start("text");
+      fireEvent.click(
+        within(screen.getByTestId("composer-row")).getByRole("button", {
+          name: "End",
+        }),
+      );
+      expect(
+        screen.getByText("Your conversation stays on screen until you leave."),
+      ).toBeInTheDocument();
+      tap("End chat");
+      await settle();
+      expect(pill()).toHaveTextContent("Ended");
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("leaves at once when the chat is over", async () => {
+      const { onClose } = await start("text");
+      fireEvent.click(
+        within(screen.getByTestId("composer-row")).getByRole("button", {
+          name: "End",
+        }),
+      );
+      tap("End chat");
+      await settle();
+      expect(pill()).toHaveTextContent("Ended");
+
+      await pressBack();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("End this chat?")).toBeNull();
+    });
+
+    it("closes the full text first, and the chat stays", async () => {
+      const { onClose } = await start("text");
+      fireEvent.click(screen.getByRole("button", { name: "More" }));
+      await settle();
+      fireEvent.click(screen.getByRole("button", { name: /Show full text/i }));
+      await settle();
+      expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+
+      await pressBack();
+      expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(screen.queryByText("End this chat?")).toBeNull();
+      expect(screen.getByTestId("conversation")).toBeInTheDocument();
+    });
+  });
+
   describe("the microphone coach", () => {
     it("a retry that is still denied makes zero requests and keeps the button", async () => {
       const { h } = await start("voice", { mic: "denied" });
@@ -571,7 +656,9 @@ describe("ConversationScreen", () => {
       expect(chips[0]).toHaveAccessibleName("page 2, open in the full text");
 
       fireEvent.click(chips[1] as HTMLElement);
-      const dialog = await found(() => screen.getByRole("dialog"));
+      const dialog = await found(() =>
+        screen.getByRole("dialog", { name: "Full text" }),
+      );
       const page3 = within(dialog).getByRole("region", { name: "Page 3" });
       expect(page3).toHaveAttribute("data-highlight", "true");
       expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({

@@ -27,6 +27,14 @@ describe("errorCopy", () => {
     expect(errorCopy(code).action).toBe(action);
   });
 
+  it("says offline in words when a request got no answer at all", () => {
+    expect(errorCopy("network_failed")).toEqual({
+      message:
+        "You're offline or the network dropped. Check your connection and try again.",
+      action: "retry",
+    });
+  });
+
   it("offers a PDF when YouTube is blocked or out of quota", () => {
     expect(errorCopy("youtube_blocked").action).toBe("try-pdf");
     expect(errorCopy("youtube_quota").action).toBe("try-pdf");
@@ -43,6 +51,8 @@ describe("errorCopy", () => {
   });
 
   it("never shows an unknown code's text", () => {
-    expect(errorCopy("weird_code").message).toBe(ERROR_CATALOG.internal.message);
+    expect(errorCopy("weird_code").message).toBe(
+      ERROR_CATALOG.internal.message,
+    );
   });
 });

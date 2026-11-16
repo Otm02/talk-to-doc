@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { StateAdapters } from "./types";
+import type { StateAdapters } from "@/server/state/types";
 
 export interface Harness {
   adapters: StateAdapters;

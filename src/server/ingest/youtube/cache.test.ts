@@ -60,11 +60,11 @@ describe("transcript cache", () => {
     expect(await readCachedTranscript(store, "vid", "en-US")).toEqual(entry());
   });
 
-  it("expires after an hour", async () => {
+  it("expires after 24 hours", async () => {
     const { store, advance } = setup();
     await writeCachedTranscript(store, "vid", "en", entry());
 
-    advance(60 * 60_000 - 1);
+    advance(24 * 60 * 60_000 - 1);
     expect(await readCachedTranscript(store, "vid", "en")).not.toBeNull();
     advance(1);
     expect(await readCachedTranscript(store, "vid", "en")).toBeNull();

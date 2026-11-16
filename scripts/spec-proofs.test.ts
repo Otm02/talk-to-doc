@@ -39,7 +39,84 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${body}$`);
 }
 
+// Not only test files: any `src/...`, `test/...`, `e2e/...` or `scripts/...`
+// path in backticks is a claim that the file exists. Directories (trailing
+// slash), `*` globs and a `:line` suffix are allowed. A path with `<` is a
+// template, not a claim.
+const PATH_CLAIM = /`((?:src|test|e2e|scripts)\/[^`\s<>]*)`/g;
+const dirs = new Set(
+  files.flatMap((f) => {
+    const parts = f.split("/");
+    return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
+  }),
+);
+
+/** `a/{b,c}.pdf` is two paths. One level of braces is all the docs use. */
+function expandBraces(claim: string): string[] {
+  const m = /^(.*)\{([^{}]*)\}(.*)$/.exec(claim);
+  if (!m) return [claim];
+  const [, head = "", list = "", tail = ""] = m;
+  return list.split(",").flatMap((alt) => expandBraces(`${head}${alt}${tail}`));
+}
+
+export function claimedPaths(markdown: string): string[] {
+  return [
+    ...new Set(
+      [...markdown.matchAll(PATH_CLAIM)].flatMap((m) =>
+        expandBraces((m[1] ?? "").replace(/:\d+(?:-\d+)?$/, "")),
+      ),
+    ),
+  ];
+}
+
+export function pathExists(claim: string): boolean {
+  if (claim.includes("*")) {
+    const re = globToRegExp(claim.replace(/\/$/, ""));
+    return [...files, ...dirs].some((f) => re.test(f));
+  }
+  if (claim.endsWith("/")) return dirs.has(claim.slice(0, -1));
+  return files.includes(claim) || dirs.has(claim);
+}
+
+// The same rule for the docs that describe the code as it is (PLAN.md is
+// left out: it records what was planned, including names that changed).
+describe.each(["ARCHITECTURE", "DEPLOY", "SECURITY"])(
+  "docs/%s.md paths",
+  (name) => {
+    it("points every src/, test/, e2e/ and scripts/ path at something that exists", () => {
+      const text = readFileSync(path.join(root, `docs/${name}.md`), "utf8");
+      const missing = claimedPaths(text)
+        // A pattern such as src/app/**/page.tsx is a rule, not a file.
+        .filter((p) => !p.includes("**"))
+        .filter((p) => !pathExists(p));
+      expect(missing).toEqual([]);
+    });
+  },
+);
+
 describe("docs/SPEC.md proofs", () => {
+  it("expands braces, so a claim of several files is checked file by file", () => {
+    expect(
+      claimedPaths("`test/fixtures/pdf/{cjk,arabic}.pdf` and `src/a.ts:12`"),
+    ).toEqual([
+      "test/fixtures/pdf/cjk.pdf",
+      "test/fixtures/pdf/arabic.pdf",
+      "src/a.ts",
+    ]);
+    expect(pathExists("test/fixtures/pdf/cjk.pdf")).toBe(true);
+    expect(pathExists("test/fixtures/pdf/nope.pdf")).toBe(false);
+    expect(pathExists("src/server/youtube")).toBe(false);
+    expect(pathExists("src/server/ingest/youtube/")).toBe(true);
+  });
+
+  it("names a good number of paths (the parser is not matching nothing)", () => {
+    expect(claimedPaths(spec).length).toBeGreaterThan(90);
+  });
+
+  it("points every src/, test/, e2e/ and scripts/ path at something that exists", () => {
+    expect(claimedPaths(spec).filter((p) => !pathExists(p))).toEqual([]);
+  });
+
   it("names a good number of test files (the parser is not matching nothing)", () => {
     expect(new Set(proofs).size).toBeGreaterThan(60);
   });

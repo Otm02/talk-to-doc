@@ -321,7 +321,8 @@ describe("failing to connect", () => {
     await settle();
     pc().setIce("failed");
     await settle();
-    expect(outcome.value).toMatchObject({ kind: "network" });
+    // The offer got through, so the device is online: not "network".
+    expect(outcome.value).toMatchObject({ kind: "media" });
     expect(states).toEqual(["connecting", "failed"]);
     expect(pc().closeCalls).toBe(1);
   });

@@ -7,13 +7,17 @@ import { answers, pill } from "./support";
 // hand with `pnpm test:live` (a few cents on the mini model, twice at most).
 // It is excluded from `pnpm test:e2e` and skipped in CI.
 //
-// Chromium plays tests/fixtures/question.wav into a fake microphone, the app
+// Chromium plays test/fixtures/audio/question.wav (or the file named by
+// LIVE_QUESTION_WAV) into a fake microphone, the app
 // talks to the real API, and the test asserts that an assistant transcript
 // appears. It does not judge the answer, so it does not depend on what the
 // question says.
 
 const MINI = "gpt-realtime-2.1-mini";
-const QUESTION = path.join(process.cwd(), "tests/fixtures/question.wav");
+const QUESTION = path.resolve(
+  process.cwd(),
+  process.env.LIVE_QUESTION_WAV ?? "test/fixtures/audio/question.wav",
+);
 
 test.describe("@live the real Realtime API", () => {
   test.skip(!!process.env.CI, "never runs in CI: it spends real money");

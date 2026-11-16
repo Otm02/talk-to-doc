@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { runStateContract, type Harness } from "./contract";
+import { afterAll, describe, expect, it } from "vitest";
+import { runStateContract, type Harness } from "@test/state-contract";
 import { createMemoryAdapters } from "./memory";
 import { secondsUntilNextUtcDay } from "./types";
 import { createUpstashAdapters, createUpstashRedis } from "./upstash";
@@ -32,16 +32,41 @@ runStateContract("memory", (): Harness => {
   };
 });
 
+// The live suite writes real keys, and a developer's shell or .env.local often
+// holds the production Upstash credentials. So credentials alone never start
+// it: it needs RUN_LIVE_UPSTASH_TESTS=1 as well, it writes only under its own
+// `ttd-test:<timestamp>` prefix (production's is `ttd`), and it deletes
+// everything it wrote afterwards.
 const url = process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
 const token =
   process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
+const optedIn = process.env.RUN_LIVE_UPSTASH_TESTS === "1";
 
-if (url && token) {
+if (url && token && optedIn) {
+  const redis = createUpstashRedis(url, token);
+  const prefix = `ttd-test:${Date.now()}`;
+
+  afterAll(async () => {
+    let cursor = "0";
+    do {
+      const [next, keys] = await redis.scan(cursor, {
+        match: `${prefix}:*`,
+        count: 200,
+      });
+      if (keys.length > 0) await redis.del(...keys);
+      cursor = next;
+    } while (cursor !== "0");
+  });
+
   runStateContract("upstash", (): Harness => ({
-    adapters: createUpstashAdapters(createUpstashRedis(url, token)),
+    adapters: createUpstashAdapters(redis, undefined, prefix),
     advance: (ms) => new Promise((r) => setTimeout(r, ms)),
     canJumpDays: false,
   }));
 } else {
-  describe.skip("state contract: upstash (no UPSTASH_REDIS_REST_* in env)", () => {});
+  const why =
+    url && token
+      ? "set RUN_LIVE_UPSTASH_TESTS=1 to run against Upstash"
+      : "no UPSTASH_REDIS_REST_* in env";
+  describe.skip(`state contract: upstash (${why})`, () => {});
 }
