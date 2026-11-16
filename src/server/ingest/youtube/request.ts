@@ -91,12 +91,14 @@ export async function ingestYoutube(
       if (err instanceof TranscriptError) throw toAppError(err);
       throw err;
     }
-    await writeCachedTranscript(store, videoId, lang, served);
   }
 
   const { transcript, provider } = served;
   deps.onProvider?.(provider);
   assertNotTooLong(served);
+  if (!cached) {
+    await writeCachedTranscript(store, videoId, lang, served);
+  }
 
   const paragraphs = toParagraphs(transcript.segments);
   const fullText = renderForModel(paragraphs);

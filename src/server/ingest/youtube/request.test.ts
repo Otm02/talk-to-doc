@@ -379,12 +379,19 @@ describe("ingestYoutube: refusals happen before the stream", () => {
     expect(text).not.toContain("sd_live");
   });
 
-  it("refuses a video longer than 6 hours", async () => {
-    const { chain } = fakeChain(transcriptOf(3, { durationSec: 6 * 3600 + 1 }));
+  it("refuses a video longer than 6 hours without caching it", async () => {
+    const { chain, fetch } = fakeChain(
+      transcriptOf(3, { durationSec: 6 * 3600 + 1 }),
+    );
     await expectError(
       await run(chain, post({ url: URL_OK })),
       "youtube_too_long",
     );
+    await expectError(
+      await run(chain, post({ url: URL_OK })),
+      "youtube_too_long",
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("accepts a video of exactly 6 hours", async () => {

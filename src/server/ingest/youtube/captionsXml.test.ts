@@ -19,6 +19,16 @@ describe("parseCaptionsXml", () => {
     ]);
   });
 
+  it("reads single-quoted start and dur attributes", () => {
+    const xml = wrap(
+      "<text start='12.34' dur='2.5'>Single quoted</text><text start='15' dur=\"1\">Mixed</text>",
+    );
+    expect(parseCaptionsXml(xml)).toEqual([
+      { startMs: 12340, durMs: 2500, text: "Single quoted" },
+      { startMs: 15000, durMs: 1000, text: "Mixed" },
+    ]);
+  });
+
   it("defaults a missing dur to 0", () => {
     expect(parseCaptionsXml(wrap('<text start="3">Hi</text>'))).toEqual([
       { startMs: 3000, durMs: 0, text: "Hi" },
