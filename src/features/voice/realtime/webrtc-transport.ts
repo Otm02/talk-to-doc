@@ -246,7 +246,8 @@ export class WebRtcTransport implements RealtimeTransport {
         if (this.state === "connected") this.setState("disconnected");
         break;
       case "failed":
-        if (this.failConnect) this.failConnect(new TransportError("network"));
+        // The SDP exchange already got through, so this is not "Offline".
+        if (this.failConnect) this.failConnect(new TransportError("media"));
         else this.fail();
         break;
       default:

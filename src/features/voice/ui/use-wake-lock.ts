@@ -11,17 +11,25 @@ export function useWakeLock(active: boolean): void {
     if (!active || !("wakeLock" in navigator)) return;
     let sentinel: WakeLockSentinel | null = null;
     let cancelled = false;
+    // A request is in flight. Coming back to the page while the first one is
+    // still pending would otherwise ask again, and the lock that lost the race
+    // would be forgotten while still held.
+    let acquiring = false;
 
     const acquire = async () => {
+      if (sentinel || acquiring) return;
+      acquiring = true;
       try {
         const lock = await navigator.wakeLock.request("screen");
-        if (cancelled) {
+        if (cancelled || sentinel) {
           void lock.release().catch(() => {});
           return;
         }
         sentinel = lock;
       } catch {
         // Denied (battery saver, no permission): the chat still works.
+      } finally {
+        acquiring = false;
       }
     };
     const release = () => {

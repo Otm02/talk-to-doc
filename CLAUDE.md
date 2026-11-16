@@ -13,7 +13,7 @@ The OpenAI key belongs to Genius and has a hard $20 limit enforced by OpenAI bil
 - REALTIME_MODEL defaults to gpt-realtime-2.1-mini. Only production switches to gpt-realtime-2.1, at the end.
 - Unit tests, e2e tests and CI never call the live OpenAI API. Use MockTransport and recorded fixtures.
 - Ask me before any step that calls the live API, and keep live sessions short.
-- Cost guards that stay: REALTIME_MODEL, CONTEXT_TOKEN_BUDGET (8000 by default, 20000 in final production), VOICE_ENABLED (kill switch), MAX_SESSION_MINUTES, per-IP rate limiting and DAILY_SESSION_CAP. POST /api/session enforces them, and maps OpenAI's quota or billing-limit error to 503 `budget_exhausted`.
+- Cost guards that stay: REALTIME_MODEL, CONTEXT_TOKEN_BUDGET (8000 by default, 20000 in final production), VOICE_ENABLED (kill switch), MAX_SESSION_MINUTES, per-IP rate limiting and DAILY_SESSION_CAP. POST /api/realtime/session enforces them, and maps OpenAI's quota or billing-limit error to 503 `budget_exhausted`.
 - The client shows a cost overlay, in development or with ?debug=1, that estimates tokens and cost from response.done events. Nothing is reported to the server. The same flag gates the event recorder.
 
 ## Commands

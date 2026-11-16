@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { runStateContract, type Harness } from "./contract";
+import { runStateContract, type Harness } from "@test/state-contract";
 import { createMemoryAdapters } from "./memory";
 import { secondsUntilNextUtcDay } from "./types";
 import { createUpstashAdapters, createUpstashRedis } from "./upstash";

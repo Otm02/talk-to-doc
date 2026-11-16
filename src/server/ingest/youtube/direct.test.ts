@@ -25,6 +25,25 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("DirectProvider and oversized responses", () => {
+  it("gives up on a body over the cap without reading it all", async () => {
+    let pulls = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(1_000_000).fill(60));
+      },
+    });
+    stubYoutube("manual", { watch: () => new Response(endless) });
+    await expectCode(
+      createDirectProvider(FAST_FAIL).fetch(ID, "en", signal()),
+      "UPSTREAM_FAILED",
+    );
+    // The cap is 10 MB: about ten pulls and a little read-ahead, never a flood.
+    expect(pulls).toBeLessThan(30);
+  });
+});
+
 describe("DirectProvider with recorded responses", () => {
   it("reads manual captions and the video details", async () => {
     stubYoutube("manual");

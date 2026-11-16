@@ -3,6 +3,7 @@ import { z } from "zod";
 import { canonicalUrl } from "@/lib/youtube/parseUrl";
 import { parseCaptionsXml } from "./captionsXml";
 import { withDeadline } from "./deadline";
+import { BodyTooLargeError, readStreamCapped } from "../../read-capped";
 import { MAX_RESPONSE_CHARS } from "./limits";
 import { pickTrack } from "./pickTrack";
 import {
@@ -119,14 +120,24 @@ function assertOk(res: Response): void {
   }
 }
 
+/**
+ * The body as text, read through a byte cap: a character count after
+ * `res.text()` would have buffered the whole thing first. UTF-8 bytes are at
+ * least as many as characters, so the cap on bytes is the stricter of the two.
+ */
 async function readText(res: Response): Promise<string> {
-  const text = await res.text();
-  if (text.length > MAX_RESPONSE_CHARS) {
-    throw new TranscriptError("UPSTREAM_FAILED", {
-      cause: new Error("Response too large"),
-    });
+  if (!res.body) return "";
+  try {
+    const bytes = await readStreamCapped(res.body, MAX_RESPONSE_CHARS);
+    return new TextDecoder().decode(bytes);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) {
+      throw new TranscriptError("UPSTREAM_FAILED", {
+        cause: new Error("Response too large"),
+      });
+    }
+    throw err;
   }
-  return text;
 }
 
 async function run(

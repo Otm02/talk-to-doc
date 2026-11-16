@@ -22,8 +22,14 @@ export type TransportErrorKind =
   | "busy"
   /** A billing or quota error: never retried. */
   | "budget"
-  /** Could not reach OpenAI, or the media path failed during connect. */
+  /** Could not reach OpenAI: the request got no answer. */
   | "network"
+  /**
+   * OpenAI answered and the offer was accepted, but ICE could not find a path
+   * for the media (a firewall, a NAT that needs a relay). The device is not
+   * offline, so this must not be called that.
+   */
+  | "media"
   /** close() ran while connecting. */
   | "aborted"
   /** The browser has no WebRTC. */

@@ -140,6 +140,7 @@ export function failureForTransportError(err: unknown): FailureCode | null {
       return "session_network_failed";
     case "timeout":
     case "rejected":
+    case "media":
     case "unsupported":
       return "session_connect_failed";
     default: {
@@ -174,6 +175,12 @@ export class VoiceSession {
   // the time the user comes back; these let us judge by the clock instead.
   private hiddenSince: number | null = null;
   private capDeadline: number | null = null;
+  /**
+   * The old session's cap deadline, handed to the replacement that adding a
+   * mic can cause. Consumed by startTimers: the chat is one chat, so it keeps
+   * its one clock.
+   */
+  private carriedDeadline: number | null = null;
   private lastActivityAt = 0;
   private lastMicRetryAt = Number.NEGATIVE_INFINITY;
   private lastMicReacquireAt = Number.NEGATIVE_INFINITY;
@@ -637,11 +644,17 @@ export class VoiceSession {
    */
   private restartWithMic(stream: MediaStream): void {
     const history = this.visibleTurns();
+    // It is the same chat: the cap clock and the reconnect allowance already
+    // spent are not the new session's to start over. (cleanup() clears both.)
+    const deadline = this.capDeadline;
+    const ledger = this.ledger;
     // Out of cleanup's reach: the mic is the one thing worth keeping.
     this.res.micCleanup?.();
     this.res.micCleanup = null;
     this.res.mic = null;
     this.cleanup();
+    this.carriedDeadline = deadline;
+    this.ledger = ledger;
     // Not inside a tap any more, but a page that is capturing the mic may
     // start audio without one, so the new audio element still plays.
     this.begin("voice", stream, history);
@@ -1062,7 +1075,22 @@ export class VoiceSession {
   // ------------------------------------------------------------- timers
 
   private startTimers(maxSeconds: number): void {
-    const capMs = maxSeconds * 1000;
+    // A replacement session for the same chat has what is left of the clock,
+    // not a fresh one. Anything else (a new chat, a manual Reconnect) starts
+    // the full length.
+    const carried = this.carriedDeadline;
+    this.carriedDeadline = null;
+    const capMs =
+      carried === null
+        ? maxSeconds * 1000
+        : Math.min(maxSeconds * 1000, Math.max(0, carried - this.deps.now()));
+    if (carried !== null && capMs > 0 && capMs <= CAP_WARNING_MS) {
+      // The warning's moment has passed: say it now.
+      this.dispatch({
+        type: "notice",
+        notice: { kind: "cap_warning", secondsLeft: Math.ceil(capMs / 1000) },
+      });
+    }
     if (capMs > CAP_WARNING_MS) {
       this.setTimer("capWarning", capMs - CAP_WARNING_MS, () =>
         this.dispatch({
@@ -1186,6 +1214,7 @@ export class VoiceSession {
     this.offVisibility = null;
     this.hiddenSince = null;
     this.capDeadline = null;
+    this.carriedDeadline = null;
     this.rc = null;
     this.ledger = EMPTY_LEDGER;
     this.micNeedsSwap = false;
