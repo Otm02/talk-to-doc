@@ -16,6 +16,7 @@ describe("GET /api/health", () => {
     expect(body).toEqual({
       ok: true,
       version: expect.any(String),
+      model: expect.any(String),
       uploadMode: "direct",
       state: "memory",
     });
