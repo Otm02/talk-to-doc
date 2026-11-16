@@ -44,17 +44,17 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - README skeleton: setup, run, test.
 
 **Acceptance criteria**
-- [ ] `pnpm check` passes locally and in CI.
+- [x] `pnpm check` passes locally and in CI.
 - [ ] A push to a branch produces a Vercel preview URL, and `/api/health` returns `{ ok: true }` there.
-- [ ] Missing or invalid env fails fast at boot with a readable message that never prints a secret value.
-- [ ] Importing `src/server/**` from a client module fails lint.
+- [x] Missing or invalid env fails fast at boot with a readable message that never prints a secret value.
+- [x] Importing `src/server/**` from a client module fails lint.
 
 **Tests**
-- [ ] `src/server/env.test.ts`: defaults (mini, 8k), invalid model rejected, `memory` refused on Vercel, `fixture` refused in production, secrets never in error text.
-- [ ] `src/server/http/route-helper.test.ts`: zod failure → `invalid_request`; AppError → catalog status and copy; unknown error → `internal` with no upstream message.
-- [ ] `src/server/adapters/*.contract.test.ts` against memory: TTL expiry, sliding window, daily counter (cap, independent keys, UTC day rollover).
-- [ ] `src/server/log.test.ts`: redaction of keys and tokens.
-- [ ] `next.config` headers test (CSP, HSTS, Permissions-Policy present).
+- [x] `src/server/env.test.ts`: defaults (mini, 8k), invalid model rejected, `memory` refused on Vercel, `fixture` refused in production, secrets never in error text.
+- [x] `src/server/http/route-helper.test.ts`: zod failure → `invalid_request`; AppError → catalog status and copy; unknown error → `internal` with no upstream message. (now `src/server/http.test.ts` and `src/server/errors.test.ts`)
+- [x] `src/server/adapters/*.contract.test.ts` against memory: TTL expiry, sliding window, daily counter (cap, independent keys, UTC day rollover). (now `test/state-contract.ts`, run by `state.test.ts` and `upstash.fake.test.ts`)
+- [x] `src/server/log.test.ts`: redaction of keys and tokens.
+- [x] `next.config` headers test (CSP, HSTS, Permissions-Policy present). (now `src/lib/security-headers.test.ts`)
 
 ## M2 PDF pipeline
 
@@ -70,15 +70,15 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - Private Blob store created for previews with the RW token; CSP adds the upload host.
 
 **Acceptance criteria**
-- [ ] Every PDF edge case in SPEC §5.1 returns its catalog code or the specified behavior.
+- [x] Every PDF edge case in SPEC §5.1 returns its catalog code or the specified behavior.
 - [ ] **On a Vercel preview, a 20 MB text PDF uploaded through Blob extracts every page into NDJSON, and the blob is gone from the dashboard afterwards (MC-1).**
 - [ ] A broken stream retried with the same key returns the stored document without re-extracting.
-- [ ] No PDF bytes pass through a function body in blob mode.
+- [x] No PDF bytes pass through a function body in blob mode.
 
 **Tests**
-- [ ] `validate.test.ts`: oversize, empty, wrong magic bytes, magic bytes after junk ≤ 1,024 bytes.
-- [ ] `extract.test.ts`: normal, encrypted, owner-password-only, corrupted, scanned, partial, too many pages, timeout (fake clock), Arabic, CJK, Cyrillic, Devanagari.
-- [ ] `normalize.test.ts`: each ligature, Arabic presentation forms, hyphen join and keep rules, whitespace.
+- [x] `validate.test.ts`: oversize, empty, wrong magic bytes, magic bytes after junk ≤ 1,024 bytes.
+- [x] `extract.test.ts`: normal, encrypted, owner-password-only, corrupted, scanned, partial, too many pages, timeout (fake clock), Arabic, CJK, Cyrillic, Devanagari.
+- [x] `normalize.test.ts`: each ligature, Arabic presentation forms, hyphen join and keep rules, whitespace.
 - [ ] `upload/token.test.ts`: content type, size, suffix, expiry, nonce in payload, rate limit.
 - [ ] `ingest-service.test.ts`: NDJSON framing, error line after a partial stream, blob deleted on success and failure, idempotent retry.
 - [ ] `src/app/api/ingest/pdf/route.test.ts`: zod rejection, pathname prefix and nonce checks, direct mode refused on Vercel.
@@ -134,13 +134,13 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 **Acceptance criteria**
 - [ ] Both sources reach the document screen in e2e, and every SPEC §3.1 state is visible at least once.
-- [ ] Every ingestion error in SPEC §4.1 shows its exact copy and the matching retry action.
+- [x] Every ingestion error in SPEC §4.1 shows its exact copy and the matching retry action.
 - [ ] A 2,000-page preview expands and scrolls without jank (manual check with the performance panel).
 - [ ] Screenshots at 390x844 reviewed with the playwright MCP.
 
 **Tests**
-- [ ] `ndjson-reader.test.ts`: split chunks, multi-byte UTF-8 across chunks, bad line, missing `done`.
-- [ ] `text-preview.test.tsx`: collapsed and expanded, markers, text rendered as text (no HTML injection).
+- [x] `ndjson-reader.test.ts`: split chunks, multi-byte UTF-8 across chunks, bad line, missing `done`.
+- [x] `text-preview.test.tsx`: collapsed and expanded, markers, text rendered as text (no HTML injection).
 - [ ] `e2e/ingest-pdf.spec.ts`: happy path, oversize, not a PDF, encrypted, scanned.
 - [ ] `e2e/ingest-youtube.spec.ts`: happy path, bad URL, playlist URL, no captions, auto-captions notice, language notice.
 - [ ] `e2e/states.spec.ts`: idle, working, success and error-with-retry for both sources.
@@ -157,16 +157,16 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 **Acceptance criteria**
 - [ ] The session response contains only `clientSecret`, `expiresAt`, `sessionId`, `model`, `coverage` and `limits`, never the API key or instructions.
-- [ ] Each guard in SPEC §7.4 trips with its exact code and copy.
+- [x] Each guard in SPEC §7.4 trips with its exact code and copy.
 - [ ] Instructions for an 8k and a 20k budget have the expected coverage and stay under budget by token count.
-- [ ] A document containing `</reference_material>` and "ignore all previous instructions" stays inside the fence.
+- [x] A document containing `</reference_material>` and "ignore all previous instructions" stays inside the fence.
 
 **Tests**
-- [ ] `budget.test.ts`: under budget, exact fit, unit cut, single huge unit, empty document.
-- [ ] `build-instructions.test.ts`: fence shape, escaping variants (case, spaces), title sanitizing, reconnect fence and its cap, injection fixtures.
-- [ ] `client-secrets.test.ts`: recorded 200, 400, 404, 429 with each billing code, 5xx, timeout.
+- [x] `budget.test.ts`: under budget, exact fit, unit cut, single huge unit, empty document.
+- [x] `build-instructions.test.ts`: fence shape, escaping variants (case, spaces), title sanitizing, reconnect fence and its cap, injection fixtures. (now `src/server/context/buildInstructions.test.ts`)
+- [x] `client-secrets.test.ts`: recorded 200, 400, 404, 429 with each billing code, 5xx, timeout. (now `src/server/realtime/createClientSecret.test.ts`)
 - [ ] `guard.test.ts`: every trip, limiter timeout denies, reconnect does not count against the daily cap.
-- [ ] `src/app/api/realtime/session/route.test.ts`: zod, unknown document, each guard code, billing error → 503 `budget_exhausted`.
+- [x] `src/app/api/realtime/session/route.test.ts`: zod, unknown document, each guard code, billing error → 503 `budget_exhausted`.
 
 ## M6 Realtime engine
 
@@ -179,15 +179,15 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - **[LIVE: ask first, ~2 min on mini, ~$0.05]** record real event logs into `test/fixtures/realtime/` and settle the UNVERIFIED items. **Done 2026-11-14 (voice only):** one real session recorded (`live-session-1.jsonl`, text replaced with synthetic text) and the measured cost added to SPEC §7.2. **Deferred to the M7 live checkpoint:** text mode with the receive-only audio offer, the `/calls` success status and `Location` header, and the error shape for billing.
 
 **Acceptance criteria**
-- [ ] Replaying the recorded fixtures through the mock transport produces the right transcript and states.
+- [x] Replaying the recorded fixtures through the mock transport produces the right transcript and states.
 - [~] UNVERIFIED items in reference §2: `output_modalities` placement and client item ids are confirmed from the docs. The M6 live session was voice only, so text mode (receive-only offer), the `/calls` status and `Location`, and the billing error shape are **deferred to the M7 live checkpoint**.
 - [ ] No leak after 20 start/end cycles in a test (tracks stopped, connections closed, timers cleared).
 
 **Tests**
-- [ ] `events.test.ts`: every handled event parses; unknown and malformed events are ignored, not thrown.
-- [ ] `reducer.test.ts`: every transition in the diagram, out-of-order transcription, barge-in (`turn_detected`), client cancel, `response.done` statuses, recoverable error, fatal billing error, reconnect entry and exit.
-- [ ] `webrtc-transport.test.ts` with a fake `RTCPeerConnection`: channel before offer, non-OK SDP response, ICE events mapped, close releases everything.
-- [ ] `session.test.ts` and `use-voice-session.test.tsx` (the hook is `use-voice-session.ts`): mint failure, guard error, usage priced per response (nothing is posted), timers end the session, cleanup on unmount.
+- [x] `events.test.ts`: every handled event parses; unknown and malformed events are ignored, not thrown.
+- [x] `reducer.test.ts`: every transition in the diagram, out-of-order transcription, barge-in (`turn_detected`), client cancel, `response.done` statuses, recoverable error, fatal billing error, reconnect entry and exit.
+- [x] `webrtc-transport.test.ts` with a fake `RTCPeerConnection`: channel before offer, non-OK SDP response, ICE events mapped, close releases everything.
+- [x] `session.test.ts` and `use-voice-session.test.tsx` (the hook is `use-voice-session.ts`): mint failure, guard error, usage priced per response (nothing is posted), timers end the session, cleanup on unmount.
 
 ## M7 Voice and text UI
 
@@ -201,13 +201,13 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 **Acceptance criteria**
 - [ ] Every state in SPEC §3.3 and §3.4 is reachable in e2e with the mock transport.
-- [ ] Mic denied in WebKit lands in text mode with the exact copy.
-- [ ] Controls are at least 44 px and labeled for screen readers.
+- [x] Mic denied in WebKit lands in text mode with the exact copy.
+- [x] Controls are at least 44 px and labeled for screen readers.
 - [ ] Screenshots at 390x844 reviewed with the playwright MCP.
 
 **Tests**
 - [ ] `controls.test.tsx`, `status-pill.test.tsx`, `transcript.test.tsx`, `composer.test.tsx`.
-- [ ] `e2e/voice.spec.ts` (Chromium fake media): start, speak (scripted), interrupt, end, every budget error.
+- [x] `e2e/voice.spec.ts` (Chromium fake media): start, speak (scripted), interrupt, end, every budget error.
 - [ ] `e2e/text-mode.spec.ts` (WebKit, no mic): automatic fallback, send, streamed reply, retry on failure.
 
 ## M8 Mobile polish
@@ -229,13 +229,13 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - **[LIVE: ask first, ~$0.10]** iPhone Safari and Android Chrome pass (MC-4).
 
 **Acceptance criteria**
-- [ ] axe reports no serious or critical issues on every screen.
+- [x] axe reports no serious or critical issues on every screen.
 - [ ] MC-4 passes on both phones: safe areas, keyboard, rotation, lock and unlock.
 - [ ] Screenshots of every screen and state at 390x844 reviewed and attached to the PR.
 
 **Tests**
-- [ ] `e2e/layout.spec.ts`: axe per screen, no horizontal overflow, tap target sizes, reduced-motion snapshot.
-- [ ] `wake-lock.test.ts`: acquire, release on end and on hidden, unsupported browser.
+- [x] `e2e/layout.spec.ts`: axe per screen, no horizontal overflow, tap target sizes, reduced-motion snapshot.
+- [x] `wake-lock.test.ts`: acquire, release on end and on hidden, unsupported browser. (now `src/features/voice/ui/use-wake-lock.test.tsx`)
 
 ## M9 Network resilience
 
@@ -251,10 +251,10 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - **[LIVE: ask first, ~$0.10]** airplane mode for 5 s and 30 s, and a Wi-Fi to cellular switch (MC-5); the manual list is ARCHITECTURE §10.2.
 
 **Acceptance criteria**
-- [ ] A 5 s drop recovers without a new session; a 30 s drop reconnects with the transcript intact and exactly one new secret; a permanent drop ends in "Connection lost" with Reconnect and Switch to text.
-- [ ] A broken YouTube stream recovers without the user doing anything; a broken PDF stream keeps its pages and offers Try again.
-- [ ] A 429 during a reconnect shows Cooldown, counts down and resumes at 0 without a loop.
-- [ ] Every reconnect mint counts against `DAILY_SESSION_CAP`.
+- [x] A 5 s drop recovers without a new session; a 30 s drop reconnects with the transcript intact and exactly one new secret; a permanent drop ends in "Connection lost" with Reconnect and Switch to text.
+- [x] A broken YouTube stream recovers without the user doing anything; a broken PDF stream keeps its pages and offers Try again.
+- [x] A 429 during a reconnect shows Cooldown, counts down and resumes at 0 without a loop.
+- [x] Every reconnect mint counts against `DAILY_SESSION_CAP`.
 
 **Tests**
 - [x] `reconnect.test.ts` (the machine, fake timers): grace recovery, failed → reconnect, backoff, 3 failures, offline wait, 429 mid-reconnect, terminal codes.
@@ -272,15 +272,15 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 - Run `/security-review` and fix the findings; walk the SPEC §8.2 threat list and link each row's test.
 
 **Acceptance criteria**
-- [ ] Every threat T-01 to T-16 has a passing test or a documented CI check.
+- [x] Every threat T-01 to T-16 has a passing test or a documented CI check.
 - [ ] Contract suite passes against memory in CI and against Upstash locally.
 - [ ] A burst of 30 mint requests from one IP gets 15 secrets and then `rate_limited` (the per-IP mint limit is 15 per 10 minutes since M8).
 
 **Tests**
 - [ ] `*.contract.test.ts` for Upstash adapters (local only).
 - [ ] `guard.test.ts` additions: limiter timeout, daily cap across a UTC day change.
-- [ ] `cron/cleanup.test.ts`: auth required, only `uploads/` older than 1 h deleted.
-- [ ] Bundle secret check fails on a planted fake key (self-test).
+- [x] `cron/cleanup.test.ts`: auth required, only `uploads/` older than 1 h deleted. (now `src/app/api/cron/cleanup/route.test.ts`)
+- [x] Bundle secret check fails on a planted fake key (self-test).
 
 ## M11 Vercel deploy
 
@@ -301,7 +301,7 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 **Tests**
 - [ ] `e2e/smoke.prod.spec.ts` (manual run only, never in CI): health, limits, PDF ingest.
-- [ ] `env.test.ts` additions: production rules (`blob`, `upstash`, no `fixture`).
+- [x] `env.test.ts` additions: production rules (`blob`, `upstash`, no `fixture`).
 
 ## M13 Test hardening and CI e2e
 
@@ -318,11 +318,11 @@ Build envelope: $4. Planned checkpoints ≈ $0.45.
 
 **Acceptance criteria**
 - [ ] CI is green on Chromium and WebKit, three repeats without a flake.
-- [ ] Every SPEC matrix row has a passing proof.
+- [x] Every SPEC matrix row has a passing proof.
 - [ ] The review-script dry run passes on production with gpt-realtime-2.1.
 - [ ] OpenAI usage dashboard after QA shows about $4 or less spent, leaving ≥ $10 for review.
 
 **Tests**
-- [ ] CI e2e matrix (Chromium, WebKit).
-- [ ] Coverage gate in `pnpm check` CI step.
+- [x] CI e2e matrix (Chromium, WebKit).
+- [x] Coverage gate in `pnpm check` CI step.
 - [ ] Manual RS-1 to RS-5 checklist recorded in the PR.
