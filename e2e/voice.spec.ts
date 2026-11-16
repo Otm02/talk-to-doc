@@ -165,6 +165,63 @@ test.describe("conversation screen on the mock transport", () => {
     await expect(answers(page).first()).toBeVisible({ timeout: 10_000 });
   });
 
+  test("the keyboard opening keeps the latest answer in view, and the first typed message folds the mic coach", async ({
+    page,
+  }) => {
+    await stubMic(page, "denied");
+    await openDoc(page, "mockRealtime=text-turn");
+    await page.getByRole("button", { name: "Start voice chat" }).click();
+    const retry = page.getByRole("button", { name: "Try microphone again" });
+    await expect(retry).toBeEnabled({ timeout: 10_000 });
+    await retry.click();
+    await expect(page.getByTestId("mic-coach")).toBeVisible();
+
+    const composer = page.getByTestId("composer");
+    await composer.fill("Question 1");
+    await composer.press("Enter");
+    // The first message folds the steps away; the button to reopen stays.
+    await expect(page.getByTestId("mic-coach")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "How to allow it" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    await expect(answers(page).nth(0)).toHaveAttribute("data-status", "done", {
+      timeout: 10_000,
+    });
+
+    // Enough turns that the transcript has to scroll once it gets shorter.
+    for (let i = 2; i <= 6; i += 1) {
+      await composer.fill(`Question ${i}`);
+      await composer.press("Enter");
+      await expect(answers(page).nth(i - 1)).toHaveAttribute(
+        "data-status",
+        "done",
+        { timeout: 10_000 },
+      );
+    }
+
+    // The soft keyboard opens: 390x844 becomes 390x420 with no scroll event.
+    await page.setViewportSize({ width: 390, height: 420 });
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => window.visualViewport?.height ?? window.innerHeight,
+        ),
+      )
+      .toBe(420);
+
+    const last = answers(page).last();
+    await expect(last).toBeInViewport({ ratio: 1 });
+    await expect(users(page).last()).toContainText("Question 6");
+    // Visible means above the composer, not just inside the window.
+    await expect
+      .poll(async () => {
+        const box = await last.boundingBox();
+        const row = await page.getByTestId("composer-row").boundingBox();
+        return box && row ? box.y + box.height <= row.y + 1 : false;
+      })
+      .toBe(true);
+  });
+
   test("retrying a mic that is still blocked: no request, button stays, coach opens", async ({
     page,
   }) => {

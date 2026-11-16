@@ -189,6 +189,10 @@ export function ConversationScreen({
   );
   const hasNotice = state.notice !== null;
 
+  const sentText = state.order.some((id) => {
+    const item = state.items[id];
+    return item?.role === "user" && item.source === "text";
+  });
   const micBanner =
     state.micIssue && inProgress ? (
       <MicBanner
@@ -196,6 +200,7 @@ export function ConversationScreen({
         working={state.micRetry === "working"}
         fails={state.micRetryFails}
         canRetry={connected}
+        sentText={sentText}
         // Checks the mic first and only then touches the connection. It never
         // restarts the chat, so a mic that stays blocked costs no session.
         onRetry={actions.enableMic}
