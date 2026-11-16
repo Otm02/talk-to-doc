@@ -222,6 +222,51 @@ test.describe("conversation screen on the mock transport", () => {
       .toBe(true);
   });
 
+  test("the page behind the chat and behind the full text cannot be reached", async ({
+    page,
+  }) => {
+    await stubMic(page, "ok");
+    await openDoc(page, "mockRealtime=text-turn");
+    const start = page.getByRole("button", { name: "Start voice chat" });
+
+    // A sheet over the page.
+    await page.getByRole("button", { name: "Show full text" }).click();
+    const scroller = page.getByRole("region", { name: "Full text" });
+    await expect(scroller).toBeVisible();
+    await expect(start).toHaveCount(0); // hidden from the accessibility tree
+    await scroller.focus();
+    await expect(scroller).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(start).toBeVisible();
+
+    // The chat over the page: the page is inert and focus is inside the chat.
+    await page.getByRole("button", { name: "Type instead" }).click();
+    const chat = page.getByRole("dialog", { name: "Annual report" });
+    await expect(chat).toBeVisible();
+    await expect(page.getByTestId("app-root")).toHaveAttribute("inert", "");
+    // An inert button cannot take focus, whatever tries to give it any.
+    await start.evaluate((el) => (el as HTMLElement).focus());
+    expect(
+      await page.evaluate(
+        () => document.activeElement?.textContent?.includes("Start voice"),
+      ),
+    ).toBe(false);
+    expect(
+      await page.evaluate(
+        () =>
+          document
+            .querySelector('[data-testid="conversation"]')
+            ?.contains(document.activeElement) ?? false,
+      ),
+    ).toBe(true);
+
+    // And back on the page, it is live again.
+    await page.goBack();
+    await page.getByRole("button", { name: "End chat" }).click();
+    await expect(page.getByTestId("app-root")).not.toHaveAttribute("inert");
+    await expect(start).toBeVisible();
+  });
+
   test("the Back button walks out one layer at a time and never leaves the site early", async ({
     page,
   }) => {

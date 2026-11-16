@@ -52,9 +52,9 @@ export function DocumentCard({
           className="mt-0.5 size-5 shrink-0 text-muted-foreground"
         />
         <div className="min-w-0 flex-1">
-          <h2 className="text-base leading-snug font-semibold break-words">
+          <h1 className="text-base leading-snug font-semibold break-words">
             {meta.title}
-          </h2>
+          </h1>
           {isVideo && meta.channel && (
             <p className="text-sm text-muted-foreground">{meta.channel}</p>
           )}

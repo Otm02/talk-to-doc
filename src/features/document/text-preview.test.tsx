@@ -193,6 +193,52 @@ describe("TextPreview", () => {
     expect(screen.getByText("05:00 – 10:00")).toBeInTheDocument();
   });
 
+  it("puts the timestamp beside its text, so no line is stretched to 44 px", async () => {
+    render(<TextPreview doc={doc([], true)} />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
+    const link = await screen.findByRole("link", {
+      name: "Open at 05:10 on YouTube",
+    });
+    const row = link.parentElement;
+    expect(row).toHaveAttribute("data-ref-id", "s1");
+    // The link is a tap target of its own (44 px) next to the paragraph...
+    expect(link.className).toContain("min-h-11");
+    expect(link.className).toContain("min-w-11");
+    // ...and the text is not inside it, or inside anything inline with it.
+    const text = within(row as HTMLElement).getByText("later line");
+    expect(text.tagName).toBe("P");
+    expect(text).not.toContainElement(link);
+  });
+
+  it("makes the scroller a named stop for the keyboard", async () => {
+    render(<TextPreview doc={doc(["alpha"])} />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
+    const scroller = await screen.findByRole("region", { name: "Full text" });
+    expect(scroller).toHaveAttribute("tabindex", "0");
+    scroller.focus();
+    expect(scroller).toHaveFocus();
+  });
+
+  it("keeps the headings in order: Extracted text, then Full text, then each page", async () => {
+    render(<TextPreview doc={doc(["alpha", "beta"])} />);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Extracted text" }),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Show full text" }),
+    );
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Full text" }),
+    ).toBeInTheDocument();
+    const pages = screen.getAllByRole("heading", { level: 3 });
+    expect(pages.map((h) => h.textContent)).toEqual(["Page 1", "Page 2"]);
+    expect(screen.queryAllByRole("heading", { level: 4 })).toHaveLength(0);
+  });
+
   it("renders document text as text, not HTML", async () => {
     render(<TextPreview doc={doc(['<img src=x onerror="alert(1)"> hi'])} />);
     expect(document.querySelector("img")).toBeNull();

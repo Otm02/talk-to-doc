@@ -5,6 +5,7 @@ import {
   groupsToPlainText,
   indexMatches,
   previewExcerpt,
+  reflowParagraphs,
   splitByQuery,
 } from "./text-groups";
 
@@ -90,5 +91,35 @@ describe("search", () => {
     );
     expect(idx.total).toBe(3);
     expect(idx.groupOfMatch).toEqual([0, 0, 2]);
+  });
+});
+
+describe("reflowParagraphs", () => {
+  it("turns a single line break inside a paragraph into a space", () => {
+    expect(reflowParagraphs("The quick brown\nfox jumps\nover the dog.")).toBe(
+      "The quick brown fox jumps over the dog.",
+    );
+  });
+
+  it("keeps the break between paragraphs", () => {
+    expect(reflowParagraphs("One line\ncontinues.\n\nNext\nparagraph.")).toBe(
+      "One line continues.\n\nNext paragraph.",
+    );
+  });
+
+  it("treats three or more breaks as one paragraph break, and drops blanks", () => {
+    expect(reflowParagraphs("A\n\n\n\nB\n\n")).toBe("A\n\nB");
+  });
+
+  it("eats the spaces around a break and leaves other text alone", () => {
+    expect(reflowParagraphs("end  \n  start, 1 \u00a0 2")).toBe(
+      "end start, 1 \u00a0 2",
+    );
+  });
+
+  it("is applied to PDF pages in the preview, and not to captions", () => {
+    expect(buildGroups(pdf(["a\nb\n\nc"]))[0]?.units[0]?.text).toBe("a b\n\nc");
+    const v = video([0]);
+    expect(buildGroups(v)[0]?.units[0]?.text).toBe(v.segments[0]?.text);
   });
 });

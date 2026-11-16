@@ -39,7 +39,46 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${body}$`);
 }
 
+// Not only test files: any `src/...`, `test/...`, `e2e/...` or `scripts/...`
+// path in backticks is a claim that the file exists. Directories (trailing
+// slash), `*` globs and a `:line` suffix are allowed. A path with `<` is a
+// template, not a claim.
+const PATH_CLAIM = /`((?:src|test|e2e|scripts)\/[^`\s<>]*)`/g;
+const dirs = new Set(
+  files.flatMap((f) => {
+    const parts = f.split("/");
+    return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
+  }),
+);
+
+export function claimedPaths(markdown: string): string[] {
+  return [
+    ...new Set(
+      [...markdown.matchAll(PATH_CLAIM)].map((m) =>
+        (m[1] ?? "").replace(/:\d+(?:-\d+)?$/, ""),
+      ),
+    ),
+  ];
+}
+
+export function pathExists(claim: string): boolean {
+  if (claim.includes("*")) {
+    const re = globToRegExp(claim.replace(/\/$/, ""));
+    return [...files, ...dirs].some((f) => re.test(f));
+  }
+  if (claim.endsWith("/")) return dirs.has(claim.slice(0, -1));
+  return files.includes(claim) || dirs.has(claim);
+}
+
 describe("docs/SPEC.md proofs", () => {
+  it("names a good number of paths (the parser is not matching nothing)", () => {
+    expect(claimedPaths(spec).length).toBeGreaterThan(100);
+  });
+
+  it("points every src/, test/, e2e/ and scripts/ path at something that exists", () => {
+    expect(claimedPaths(spec).filter((p) => !pathExists(p))).toEqual([]);
+  });
+
   it("names a good number of test files (the parser is not matching nothing)", () => {
     expect(new Set(proofs).size).toBeGreaterThan(60);
   });

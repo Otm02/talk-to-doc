@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useHistoryLayer } from "@/lib/nav/use-history-layer";
 import { ReadyBar } from "@/features/document/ready-bar";
 import type { DocumentData } from "@/features/ingest/ingest-state";
@@ -78,16 +79,19 @@ export function VoiceChat({
         onStartVoice={() => start("voice")}
         onStartText={() => start("text")}
       />
-      {open && (
-        <ConversationScreen
-          doc={doc}
-          session={session}
-          onStart={start}
-          onReloadSource={onReloadSource}
-          onEnd={end}
-          onClose={close}
-        />
-      )}
+      {/* In <body>, so the page (AppShell) can be made inert while it is open. */}
+      {open &&
+        createPortal(
+          <ConversationScreen
+            doc={doc}
+            session={session}
+            onStart={start}
+            onReloadSource={onReloadSource}
+            onEnd={end}
+            onClose={close}
+          />,
+          document.body,
+        )}
     </>
   );
 }

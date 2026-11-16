@@ -8,7 +8,7 @@ import {
   MicOff,
   PhoneOff,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   FullTextSheet,
@@ -107,6 +107,14 @@ export function ConversationScreen({
     setTyping(false);
     onStart(mode);
   };
+  // The tap that opened the chat was on the page, which is now inert, so
+  // focus would be lost. Put it on the screen, unless the composer took it.
+  const root = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useEffect(() => {
+    const el = root.current;
+    if (el && !el.contains(document.activeElement)) el.focus();
+  }, []);
   const [menuOpen, setMenuOpen] = useState(false);
   // "end": the End button. "leave": Back was pressed during a chat, so ending
   // it also goes back to the document.
@@ -223,6 +231,11 @@ export function ConversationScreen({
 
   return (
     <div
+      ref={root}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabIndex={-1}
       data-testid="conversation"
       data-layout={slim ? "compact" : "full"}
       // --vvh / --vvt come from useCompactLayout: the visible area, which
@@ -238,6 +251,7 @@ export function ConversationScreen({
         )}
       >
         <h1
+          id={titleId}
           className={cn(
             "min-w-0 flex-1 truncate font-semibold",
             slim ? "text-sm" : "text-base",

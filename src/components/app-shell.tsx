@@ -1,12 +1,22 @@
+"use client";
+
 import { AudioLines } from "lucide-react";
 import type { ReactNode } from "react";
+import { useChatOpen } from "./chat-open";
 import { OfflineBanner } from "./offline-banner";
 
 // Single column at phone width. dvh keeps the bar usable when the mobile
 // browser chrome grows or shrinks; safe-area padding clears notches.
 export function AppShell({ children }: { children: ReactNode }) {
+  // The chat is a full-screen layer in <body>, outside this tree. While it is
+  // open the page behind it must not take focus or be read out: inert does both.
+  const chatOpen = useChatOpen();
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
+    <div
+      data-testid="app-root"
+      inert={chatOpen}
+      className="mx-auto flex min-h-dvh w-full max-w-md flex-col pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]"
+    >
       <header className="flex min-h-14 items-center gap-2 border-b px-4 pt-[env(safe-area-inset-top)]">
         <AudioLines aria-hidden className="size-5" />
         <span className="text-base font-semibold">Talk to a Doc</span>

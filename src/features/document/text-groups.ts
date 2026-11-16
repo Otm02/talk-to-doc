@@ -21,13 +21,26 @@ export function timestampHref(videoId: string, startSec: number): string {
   return `${canonicalUrl(videoId)}&t=${Math.floor(startSec)}s`;
 }
 
+/**
+ * PDF text arrives with a line break wherever the page broke the line, which
+ * on a phone leaves every line short and ragged. A single break inside a
+ * paragraph becomes a space; a blank line (a paragraph break) stays.
+ */
+export function reflowParagraphs(text: string): string {
+  return text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/[^\S\n]*\n[^\S\n]*/g, " ").trim())
+    .filter((paragraph) => paragraph !== "")
+    .join("\n\n");
+}
+
 /** One group per page (PDF) or per 5-minute block (video). */
 export function buildGroups(doc: DocumentData): TextGroup[] {
   if (doc.meta.sourceType === "pdf") {
     return doc.pages.map((p) => ({
       id: `p${p.page}`,
       label: `Page ${p.page}`,
-      units: [{ id: `p${p.page}`, text: p.text }],
+      units: [{ id: `p${p.page}`, text: reflowParagraphs(p.text) }],
     }));
   }
   const { videoId } = doc.meta;
