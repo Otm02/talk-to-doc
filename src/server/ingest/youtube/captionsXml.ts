@@ -76,7 +76,7 @@ export function decodeEntities(text: string): string {
 
 const DTD = /<!\s*(DOCTYPE|ENTITY|ELEMENT|ATTLIST)/i;
 const TEXT_ELEMENT = /<text\b([^>]*?)(\/>|>([\s\S]*?)<\/text>)/g;
-const ATTRIBUTE = /([A-Za-z_:][\w:.-]*)\s*=\s*"([^"]*)"/g;
+const ATTRIBUTE = /([A-Za-z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 const TAG = /<[^>]*>/g;
 // A caption that is only a sound cue, like "[Music]" or "[Applause] [Laughter]".
 const SOUND_TAG_ONLY = /^(?:\[[^\]]*\]\s*)+$/;
@@ -84,8 +84,9 @@ const SOUND_TAG_ONLY = /^(?:\[[^\]]*\]\s*)+$/;
 function readAttributes(raw: string): Map<string, string> {
   const attributes = new Map<string, string>();
   for (const match of raw.matchAll(ATTRIBUTE)) {
-    const [, name, value] = match;
-    if (name !== undefined && value !== undefined) attributes.set(name, value);
+    const name = match[1]!;
+    const value = match[2] ?? match[3]!;
+    attributes.set(name, value);
   }
   return attributes;
 }
