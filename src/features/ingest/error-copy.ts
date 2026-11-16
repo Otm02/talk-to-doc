@@ -2,11 +2,7 @@ import { ERROR_CATALOG } from "@/lib/errors/catalog";
 
 /** What the error card offers. `try-pdf` switches to the PDF tab. */
 export type RecoveryAction =
-  | "retry"
-  | "pick-another-file"
-  | "edit-link"
-  | "try-pdf"
-  | "reload";
+  "retry" | "pick-another-file" | "edit-link" | "try-pdf" | "reload";
 
 export interface ErrorCopy {
   message: string;
@@ -45,6 +41,10 @@ function isOneOf(list: readonly string[], code: string): boolean {
 const UPLOAD_FAILED_MESSAGE =
   "Upload failed. Check your connection and try again.";
 
+// Also raised in the browser: a request that got no answer at all.
+const NETWORK_FAILED_MESSAGE =
+  "You're offline or the network dropped. Check your connection and try again.";
+
 function isCatalogCode(code: string): code is keyof typeof ERROR_CATALOG {
   return Object.hasOwn(ERROR_CATALOG, code);
 }
@@ -57,6 +57,9 @@ function isCatalogCode(code: string): code is keyof typeof ERROR_CATALOG {
 export function errorCopy(code: string): ErrorCopy {
   if (code === "upload_failed") {
     return { message: UPLOAD_FAILED_MESSAGE, action: "retry" };
+  }
+  if (code === "network_failed") {
+    return { message: NETWORK_FAILED_MESSAGE, action: "retry" };
   }
   const known = isCatalogCode(code) ? code : "internal";
   const message = ERROR_CATALOG[known].message;

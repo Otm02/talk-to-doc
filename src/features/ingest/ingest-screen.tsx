@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DocumentCard } from "@/features/document/document-card";
 import { TextPreview } from "@/features/document/text-preview";
 import { VoiceChat } from "@/features/voice/ui/voice-chat";
@@ -20,10 +20,27 @@ export function IngestScreen() {
   const [source, setSource] = useState<Source>("pdf");
   const [lastUrl, setLastUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // "Use another source" removes the button that was just tapped, and focus
+  // would fall to <body>. It is put on the screen's heading instead.
+  const refocusRef = useRef(false);
 
   function startOver(next?: Source) {
     ingest.reset();
     if (next) setSource(next);
+  }
+
+  function useAnotherSource() {
+    refocusRef.current = true;
+    startOver();
+  }
+
+  // An error belongs to the tab it happened on: a PDF's "not a PDF" under the
+  // YouTube field, or the other way round, is about something that is gone.
+  function changeSource(next: Source) {
+    if (next === source) return;
+    setSource(next);
+    if (state.status === "error") ingest.reset();
   }
 
   function onErrorAction(action: RecoveryAction) {
@@ -59,6 +76,13 @@ export function IngestScreen() {
       ? state.doc
       : null;
 
+  useEffect(() => {
+    if (refocusRef.current && !doc) {
+      refocusRef.current = false;
+      headingRef.current?.focus();
+    }
+  });
+
   if (doc) {
     const view = (
       <div className="flex flex-1 flex-col gap-4">
@@ -84,7 +108,7 @@ export function IngestScreen() {
     return (
       <VoiceChat
         doc={doc}
-        onUseAnother={() => startOver()}
+        onUseAnother={useAnotherSource}
         // The file or link is still in memory: loading it again is one tap.
         onReloadSource={ingest.retry}
       >
@@ -98,13 +122,19 @@ export function IngestScreen() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">Talk to a document</h1>
+        <h1
+          ref={headingRef}
+          tabIndex={-1}
+          className="text-2xl font-semibold outline-none"
+        >
+          Talk to a document
+        </h1>
         <p className="text-sm text-muted-foreground">
           Add a PDF or a YouTube link, then ask about it out loud.
         </p>
       </div>
 
-      <SourceSwitch value={source} onChange={setSource} disabled={working} />
+      <SourceSwitch value={source} onChange={changeSource} disabled={working} />
 
       {working ? (
         <UploadStatus
