@@ -517,7 +517,8 @@ function onResponseDone(
   }
 
   if (s.response.activeId === response.id) {
-    s = { ...s, response: { ...s.response, activeId: null } };
+    const audioId = status === "failed" ? null : s.response.audioId;
+    s = { ...s, response: { activeId: null, audioId } };
     s = settleActivity(s);
   }
   return s;

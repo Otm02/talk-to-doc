@@ -333,7 +333,7 @@ describe("response.done outcomes", () => {
     },
   );
 
-  it("marks a failed response interrupted and surfaces its code", () => {
+  it("marks a failed response interrupted, clears audioId, and returns to listening", () => {
     const s = play(
       [
         ev.responseDone("r1", {
@@ -346,6 +346,8 @@ describe("response.done outcomes", () => {
     );
     expect(visible(s)[1]?.status).toBe("interrupted");
     expect(s.notice).toEqual({ kind: "error", code: "server_error" });
+    expect(s.response).toEqual({ activeId: null, audioId: null });
+    expect(s.activity).toBe("listening");
     expect(s.connection.status).toBe("connected");
   });
 
