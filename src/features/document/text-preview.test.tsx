@@ -146,6 +146,36 @@ describe("TextPreview", () => {
     ).toBeInTheDocument();
   });
 
+  it("falls back to execCommand('copy') when navigator.clipboard rejects", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: vi.fn().mockRejectedValue(new Error("blocked")) },
+      configurable: true,
+    });
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", {
+      value: execCommand,
+      configurable: true,
+    });
+    try {
+      render(<TextPreview doc={doc(["alpha"])} />);
+      await userEvent.click(
+        screen.getByRole("button", { name: "Show full text" }),
+      );
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Copy" }),
+      );
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(
+        await screen.findByRole("button", { name: "Copied" }),
+      ).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(document, "execCommand", {
+        value: undefined,
+        configurable: true,
+      });
+    }
+  });
+
   it("links video timestamps to YouTube at that second", async () => {
     render(<TextPreview doc={doc([], true)} />);
     await userEvent.click(

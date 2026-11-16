@@ -10,6 +10,7 @@ import {
   SheetDescription,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { copyText } from "@/features/voice/export/export-actions";
 import type { ReferenceTarget } from "./references";
 import {
   groupsToPlainText,
@@ -161,12 +162,8 @@ function SheetBody({
   }, [copyState]);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(groupsToPlainText(groups));
-      setCopyState("copied");
-    } catch {
-      setCopyState("failed");
-    }
+    const ok = await copyText(groupsToPlainText(groups));
+    setCopyState(ok ? "copied" : "failed");
   }
 
   const step = (delta: number) => {
