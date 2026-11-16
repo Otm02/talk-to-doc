@@ -361,7 +361,10 @@ test.describe("loading on a bad network", () => {
       timeout: 15_000,
     });
     await expect(
-      page.getByRole("alert").filter({ hasText: "couldn't load" }),
+      // A connection that never answered is said as offline, not as a video problem.
+      page
+        .getByRole("alert")
+        .filter({ hasText: "offline or the network dropped" }),
     ).toBeVisible();
 
     up = true;

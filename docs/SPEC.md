@@ -117,6 +117,10 @@ Every one runs at 390x844 on Chromium and WebKit against the mock transport, wit
 | Compact layout, composer open, viewport shrunk to 390x420 | `e2e/voice.spec.ts` | "with the composer open at 390x420" |
 | Try microphone again with the mic denied: coach shown, no request to our API or OpenAI | `e2e/voice.spec.ts` | "retrying a mic that is still blocked: no request, button stays, coach opens" |
 | A 429 shows Cooldown, counts down, re-enables the button | `e2e/voice.spec.ts` | "a per-IP 429 is a Cooldown that counts down and then lets you retry" |
+| The soft keyboard opens (390x844 to 390x420) and the latest answer stays in view; the first typed message folds the mic coach | `e2e/voice.spec.ts` | "the keyboard opening keeps the latest answer in view, and the first typed message folds the mic coach" |
+| Back closes the full text, then asks before leaving a chat, then returns to the source screen, never leaving the site early | `e2e/voice.spec.ts` | "the Back button walks out one layer at a time and never leaves the site early" |
+| The page behind the chat and behind the full text cannot be focused or read | `e2e/voice.spec.ts` | "the page behind the chat and behind the full text cannot be reached" |
+| An unknown address shows Page not found with a way home | `e2e/shell.spec.ts` | "an unknown address shows Page not found with a way home" |
 | A grounding chip opens the full text at the right page | `e2e/voice.spec.ts` | "page references become chips that open the full text at that page" |
 | Markdown export, from the menu and after the chat | `e2e/voice.spec.ts` | "the transcript downloads as Markdown, from the menu and after the chat" |
 
