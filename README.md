@@ -3,7 +3,7 @@
 Upload a PDF or paste a YouTube link, read the extracted text, and talk about it out loud with the OpenAI Realtime API, from a phone.
 
 - **Live app:** https://talk-to-doc-seven.vercel.app/
-- **Video walkthrough:** _placeholder, link added after upload_
+- **Video walkthrough:** https://youtu.be/9G_xZQpekSs
 - **CI:** [![CI](https://github.com/Otm02/talk-to-doc/actions/workflows/ci.yml/badge.svg)](https://github.com/Otm02/talk-to-doc/actions/workflows/ci.yml)
 
 |                                    Document ready (390 px)                                    |                        Chat with grounding chips (390 px)                        |
